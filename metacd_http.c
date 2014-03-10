@@ -1,5 +1,5 @@
 #ifndef G_LOG_DOMAIN
-# define G_LOG_DOMAIN "metacd-http"
+# define G_LOG_DOMAIN "metacd.http"
 #endif
 
 #include <stddef.h>
@@ -23,6 +23,22 @@
 
 #include <glib.h>
 
+#ifndef RESOLVD_DEFAULT_TTL_SERVICES
+#define RESOLVD_DEFAULT_TTL_SERVICES 3600
+#endif
+
+#ifndef RESOLVD_DEFAULT_MAX_SERVICES
+#define RESOLVD_DEFAULT_MAX_SERVICES 200000
+#endif
+
+#ifndef RESOLVD_DEFAULT_TTL_CSM0
+#define RESOLVD_DEFAULT_TTL_CSM0 0
+#endif
+
+#ifndef RESOLVD_DEFAULT_MAX_CSM0
+#define RESOLVD_DEFAULT_MAX_CSM0 0
+#endif
+
 static struct http_request_dispatcher_s *dispatcher = NULL;
 static struct network_server_s *server = NULL;
 
@@ -33,6 +49,14 @@ static struct grid_lbpool_s *lbpool = NULL;
 static struct grid_task_queue_s *admin_gtq = NULL;
 static GThread *admin_thread = NULL;
 
+// Configuration
+static gint lb_refresh_delay = 10;
+#define METACD_LB_ENABLED (lb_refresh_delay >= 0)
+
+static guint dir_low_ttl =  RESOLVD_DEFAULT_TTL_SERVICES;
+static guint dir_low_max =  RESOLVD_DEFAULT_MAX_SERVICES;
+static guint dir_high_ttl = RESOLVD_DEFAULT_TTL_CSM0;
+static guint dir_high_max = RESOLVD_DEFAULT_MAX_CSM0;
 
 // REPLY building --------------------------------------------------------------
 
@@ -141,7 +165,7 @@ _parse_args_pair(gchar **t, struct url_action_s *pa)
 	gchar *escaped = g_uri_unescape_string(t[1], NULL);
 
 	for (;;++pa) {
-		if (!pa->token) {
+		if (!pa->token) { // reached the last expectable token, none matched
 			GError *e = pa->feed ? pa->feed(escaped) : NEWERROR(400,
 					"Unexpected URI token [%s]", t[0]);
 			g_free(escaped);
@@ -194,7 +218,7 @@ _extract_dir_url(const gchar *uri, gchar **rtype, struct hc_url_s **rurl)
 	gchar *type = NULL;
 
 	GError* _on_ns(const gchar *v) {
-		hc_url_set(url, HCURL_NS, v);
+		hc_url_set(url, HCURL_NS, *v ? v : NULL);
 		return NULL;
 	}
 	GError* _on_ref(const gchar *v) {
@@ -322,6 +346,97 @@ action_dir_unlink(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 }
 
 static enum http_rc_e
+action_dir_flush_low(struct http_request_s *rq, struct http_reply_ctx_s *rp,
+		const gchar *uri)
+{
+	(void) uri;
+	if (g_ascii_strcasecmp(rq->cmd, "POST"))
+		return _reply_method_error(rp);
+	hc_resolver_flush_services(resolver);
+	return _reply_success_json(rp, NULL);
+}
+
+static enum http_rc_e
+action_dir_flush_high(struct http_request_s *rq, struct http_reply_ctx_s *rp,
+		const gchar *uri)
+{
+	(void) uri;
+	if (g_ascii_strcasecmp(rq->cmd, "POST"))
+		return _reply_method_error(rp);
+	hc_resolver_flush_csm0(resolver);
+	return _reply_success_json(rp, NULL);
+}
+
+static enum http_rc_e
+action_dir_set_max_high(struct http_request_s *rq, struct http_reply_ctx_s *rp,
+		const gchar *uri)
+{
+	(void) uri;
+	if (g_ascii_strcasecmp(rq->cmd, "POST"))
+		return _reply_method_error(rp);
+	hc_resolver_set_max_csm0(resolver, atoi(uri));
+	return _reply_success_json(rp, NULL);
+}
+
+static enum http_rc_e
+action_dir_set_max_low(struct http_request_s *rq, struct http_reply_ctx_s *rp,
+		const gchar *uri)
+{
+	(void) uri;
+	if (g_ascii_strcasecmp(rq->cmd, "POST"))
+		return _reply_method_error(rp);
+	hc_resolver_set_max_services(resolver, atoi(uri));
+	return _reply_success_json(rp, NULL);
+}
+
+static enum http_rc_e
+action_dir_set_ttl_high(struct http_request_s *rq, struct http_reply_ctx_s *rp,
+		const gchar *uri)
+{
+	(void) uri;
+	if (g_ascii_strcasecmp(rq->cmd, "POST"))
+		return _reply_method_error(rp);
+	hc_resolver_set_ttl_csm0(resolver, atoi(uri));
+	return _reply_success_json(rp, NULL);
+}
+
+static enum http_rc_e
+action_dir_set_ttl_low(struct http_request_s *rq, struct http_reply_ctx_s *rp,
+		const gchar *uri)
+{
+	(void) uri;
+	if (g_ascii_strcasecmp(rq->cmd, "POST"))
+		return _reply_method_error(rp);
+	hc_resolver_set_ttl_services(resolver, atoi(uri));
+	return _reply_success_json(rp, NULL);
+}
+
+static enum http_rc_e
+action_dir_status(struct http_request_s *rq, struct http_reply_ctx_s *rp,
+		const gchar *uri)
+{
+	(void) uri;
+
+	if (g_ascii_strcasecmp(rq->cmd, "GET"))
+		return _reply_method_error(rp);
+
+	struct hc_resolver_stats_s s;
+	memset(&s, 0, sizeof(s));
+	hc_resolver_info(resolver, &s);
+
+	GString *gstr = g_string_new("{");
+	g_string_append_printf(gstr, " \"clock\":%lu,", s.clock);
+	g_string_append_printf(gstr, " \"csm0\":{"
+			"\"count\":%"G_GINT64_FORMAT",\"max\":%u,\"ttl\":%lu},",
+			s.csm0.count, s.csm0.max, s.csm0.ttl);
+	g_string_append_printf(gstr, " \"meta1\":{"
+			"\"count\":%"G_GINT64_FORMAT",\"max\":%u,\"ttl\":%lu}",
+			s.services.count, s.services.max, s.services.ttl);
+	g_string_append_c(gstr, '}');
+	return _reply_success_json(rp, gstr);
+}
+
+static enum http_rc_e
 handler_dir(gpointer u, struct http_request_s *rq, struct http_reply_ctx_s *rp)
 {
 	(void) u;
@@ -333,6 +448,24 @@ handler_dir(gpointer u, struct http_request_s *rq, struct http_reply_ctx_s *rp)
 	gchar *action = module + sizeof("dir/") - 1;
 	if (g_str_has_prefix(action, "list/"))
 		return action_dir_list(rq, rp, action + sizeof("list/") - 1);
+	if (g_str_has_prefix(action, "status"))
+		return action_dir_status(rq, rp, action + sizeof("status") - 1);
+
+	if (g_str_has_prefix(action, "flush/high"))
+		return action_dir_flush_high(rq, rp, action + sizeof("flush/high") - 1);
+	if (g_str_has_prefix(action, "flush/low"))
+		return action_dir_flush_low(rq, rp, action + sizeof("flush/low") - 1);
+
+	if (g_str_has_prefix(action, "set/ttl/high/"))
+		return action_dir_set_ttl_high(rq, rp, action + sizeof("set/ttl/high/") - 1);
+	if (g_str_has_prefix(action, "set/ttl/low/"))
+		return action_dir_set_ttl_low(rq, rp, action + sizeof("set/ttl/low/") - 1);
+	if (g_str_has_prefix(action, "set/max/high/"))
+		return action_dir_set_max_high(rq, rp, action + sizeof("set/max/high/") - 1);
+	if (g_str_has_prefix(action, "set/max/low/"))
+		return action_dir_set_max_low(rq, rp, action + sizeof("set/max/low/") - 1);
+
+	// TODO Implement these handlers
 	if (g_str_has_prefix(action, "link/"))
 		return action_dir_link(rq, rp, action + sizeof("link/") - 1);
 	if (g_str_has_prefix(action, "unlink/"))
@@ -718,6 +851,13 @@ handler_lb(gpointer u, struct http_request_s *rq, struct http_reply_ctx_s *rp)
 	if (!g_str_has_prefix(module, "lb/"))
 		return HTTPRC_NEXT;
 
+	if (!METACD_LB_ENABLED) {
+		GError *err = NEWERROR(CODE_UNAVAILABLE,
+				"Load-balancer disabled by configuration");
+		return _reply_json(rp, CODE_UNAVAILABLE,
+				"Service unavailable", _create_status_error(err));
+	}
+
 	gchar *action = module + sizeof("lb/") - 1;
 	if (g_str_has_prefix(action, "sl/"))
 		return action_lb_sl(rq, rp, action + sizeof("sl/") - 1);
@@ -974,15 +1114,53 @@ handler_check(gpointer u, struct http_request_s *rq, struct http_reply_ctx_s *rp
 	return HTTPRC_NEXT;
 }
 
+static enum http_rc_e
+handler_help(gpointer u, struct http_request_s *rq, struct http_reply_ctx_s *rp)
+{
+	(void) u, (void) rq;
+
+	gchar *module = rq->req_uri + 1;
+	if (!g_str_has_prefix(module, "help"))
+		return HTTPRC_NEXT;
+
+	GString *gstr = g_string_new("");
+	if (METACD_LB_ENABLED) {
+		g_string_append(gstr, "/lb/sl/ns/${NS}/type/${TYPE}\n");
+		g_string_append(gstr, "\tStateless load-balancing\n");
+	}
+
+	g_string_append(gstr, "/m2/get/ns/${NS}/ref/${REF}/path/${PATH}\n");
+	g_string_append(gstr, "\tContent locating\n");
+
+	g_string_append(gstr, "/dir/list/${NS}/ref/${REF}/type/${TYPE}\n");
+	g_string_append(gstr, "\tContainer service listing\n");
+	g_string_append(gstr, "/dir/status\n");
+	g_string_append(gstr, "\tSimple stats about the directory cache usage\n");
+	g_string_append(gstr, "/dir/flush/low\n");
+	g_string_append(gstr, "\tFlushes the meta1's cache.\n");
+	g_string_append(gstr, "/dir/flush/high\n");
+	g_string_append(gstr, "\tFlushes the conscience + meta0's cache.\n");
+
+	g_string_append(gstr, "/dir/set/ttl/low/${INTEGER}\n");
+	g_string_append(gstr, "/dir/set/max/low/${INTEGER}\n");
+	g_string_append(gstr, "/dir/set/ttl/high/${INTEGER}\n");
+	g_string_append(gstr, "/dir/set/max/high/${INTEGER}\n");
+	g_string_append(gstr, "\tChange on the fly the configuration value.\n");
+	return _reply_success_json(rp, gstr);
+}
 
 // Administrative tasks --------------------------------------------------------
 
 static void
 _task_expire_resolver(struct hc_resolver_s *r)
 {
-	guint count = hc_resolver_expire(r, time(0));
+	hc_resolver_set_now(r, time(0));
+	guint count = hc_resolver_expire(r);
 	if (count)
 		GRID_DEBUG("Expired %u resolver entries", count);
+	count = hc_resolver_purge(r);
+	if (count)
+		GRID_DEBUG("Purged %u resolver ", count);
 }
 
 static void
@@ -1038,6 +1216,17 @@ static struct grid_main_option_s *
 grid_main_get_options(void)
 {
 	static struct grid_main_option_s options[] = {
+		{"LbRefresh", OT_INT, {.i=&lb_refresh_delay},
+			"Interval between load-balancer service refreshes (seconds)\n"
+				"\t\t-1 to disable, 0 to never refresh"},
+		{"DirLowTtl", OT_UINT, {.u=&dir_low_ttl},
+			"Directory 'low' (meta1) TTL for cache elements"},
+		{"DirLowMax", OT_UINT, {.u=&dir_low_max},
+			"Directory 'low' (meta1) MAX cached elements"},
+		{"DirHighTtl", OT_UINT, {.u=&dir_high_ttl},
+			"Directory 'high' (cs+meta0) TTL for cache elements"},
+		{"DirHighMax", OT_UINT, {.u=&dir_high_max},
+			"Directory 'high' (cs+meta0) MAX cached elements"},
 		{NULL, 0, {.i=0}, NULL}
 	};
 
@@ -1085,11 +1274,12 @@ static gboolean
 grid_main_configure(int argc, char **argv)
 {
 	static struct http_request_descr_s all_requests[] = {
-		{ "check", handler_check },
 		{ "lb", handler_lb },
 		{ "m2", handler_m2 },
-		{ "cs", handler_cs },
 		{ "dir", handler_dir },
+		{ "cs", handler_cs },
+		{ "check", handler_check },
+		{ "help", handler_help },
 		{ NULL, NULL }
 	};
 
@@ -1104,11 +1294,21 @@ grid_main_configure(int argc, char **argv)
 	resolver = hc_resolver_create();
 	lbpool = grid_lbpool_create(nsname);
 
+	if (resolver) {
+		hc_resolver_set_ttl_csm0(resolver, dir_high_ttl);
+		hc_resolver_set_max_csm0(resolver, dir_high_max);
+		hc_resolver_set_ttl_services(resolver, dir_low_ttl);
+		hc_resolver_set_max_services(resolver, dir_low_max);
+		GRID_INFO("RESOLVER limits HIGH[%u/%u] LOW[%u/%u]",
+				dir_high_max, dir_high_ttl, dir_low_max, dir_low_ttl);
+	}
+
 	admin_gtq = grid_task_queue_create("admin");
 	grid_task_queue_register(admin_gtq, 1,
 			(GDestroyNotify)_task_expire_resolver, NULL, resolver);
-	grid_task_queue_register(admin_gtq, 10,
-			(GDestroyNotify)_task_reload_lbpool, NULL, lbpool);
+	if (METACD_LB_ENABLED)
+		grid_task_queue_register(admin_gtq, (guint)lb_refresh_delay,
+				(GDestroyNotify)_task_reload_lbpool, NULL, lbpool);
 	grid_task_queue_fire(admin_gtq);
 
 	network_server_bind_host_lowlatency(server, argv[0],
