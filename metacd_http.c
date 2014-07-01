@@ -672,7 +672,6 @@ action_m2_list(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		return m2v2_remote_execute_LIST(m2->host, NULL, url, 0, &beans);
 	}
 	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
-		hc_url_clean(url);
 		g_prefix_error(&err, "M2 error: ");
 		return _reply_soft_error(rp, err);
 	}
@@ -680,7 +679,6 @@ action_m2_list(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	GString *gstr = g_string_sized_new(1024);
 	_json_dump_all_beans(gstr, url, beans);
 	_bean_cleanl2(beans);
-	hc_url_clean(url);
 	return _reply_success_json(rp, gstr);
 }
 
@@ -689,10 +687,8 @@ action_m2_get(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		struct hc_url_s *url)
 {
 	(void) rq;
-	if (NULL == hc_url_get_option_value(url, "size")) {
-		hc_url_clean(url);
+	if (NULL == hc_url_get_option_value(url, "size"))
 		return _reply_format_error(rp, NEWERROR(400, "Missing size"));
-	}
 
 	GError *err;
 	GSList *beans = NULL;
@@ -705,7 +701,6 @@ action_m2_get(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		return _single_get_v1(m2, url, &beans);
 	}
 	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
-		hc_url_clean(url);
 		g_prefix_error(&err, "M2 error: ");
 		return _reply_soft_error(rp, err);
 	}
@@ -713,7 +708,6 @@ action_m2_get(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	GString *gstr = g_string_sized_new(512);
 	_json_dump_all_beans(gstr, url, beans);
 	_bean_cleanl2(beans);
-	hc_url_clean(url);
 	return _reply_success_json(rp, gstr);
 }
 
@@ -733,7 +727,6 @@ action_m2_beans(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		return m2v2_remote_execute_BEANS(m2->host, NULL, url, strpol, size, 0, &beans);
 	}
 	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
-		hc_url_clean(url);
 		g_prefix_error(&err, "M2 error: ");
 		return _reply_soft_error(rp, err);
 	}
@@ -741,7 +734,6 @@ action_m2_beans(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	GString *gstr = g_string_sized_new(512);
 	_json_dump_all_beans(gstr, url, beans);
 	_bean_cleanl2(beans);
-	hc_url_clean(url);
 	return _reply_success_json(rp, gstr);
 }
 
@@ -759,7 +751,6 @@ action_m2_create(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		return m2v2_remote_execute_CREATE(m2->host, NULL, url, &param);
 	}
 	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
-		hc_url_clean(url);
 		g_prefix_error(&err, "M2 error: ");
 		return _reply_soft_error(rp, err);
 	}
@@ -776,7 +767,6 @@ action_m2_destroy(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		return m2v2_remote_execute_DESTROY(m2->host, NULL, url, 0);
 	}
 	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
-		hc_url_clean(url);
 		g_prefix_error(&err, "M2 error: ");
 		return _reply_soft_error(rp, err);
 	}
@@ -793,7 +783,6 @@ action_m2_open(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		return m2v2_remote_execute_OPEN(m2->host, NULL, url);
 	}
 	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
-		hc_url_clean(url);
 		g_prefix_error(&err, "M2 error: ");
 		return _reply_soft_error(rp, err);
 	}
@@ -810,7 +799,6 @@ action_m2_close(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		return m2v2_remote_execute_CLOSE(m2->host, NULL, url);
 	}
 	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
-		hc_url_clean(url);
 		g_prefix_error(&err, "M2 error: ");
 		return _reply_soft_error(rp, err);
 	}
@@ -827,7 +815,6 @@ action_m2_has(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		return m2v2_remote_execute_HAS(m2->host, NULL, url);
 	}
 	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
-		hc_url_clean(url);
 		g_prefix_error(&err, "M2 error: ");
 		return _reply_soft_error(rp, err);
 	}
@@ -858,7 +845,6 @@ action_m2_dedup(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	}
 	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
 		g_string_free(gstr, TRUE);
-		hc_url_clean(url);
 		g_prefix_error(&err, "M2 error: ");
 		return _reply_soft_error(rp, err);
 	}
@@ -878,7 +864,6 @@ action_m2_purge(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		return m2v2_remote_execute_PURGE(m2->host, NULL, url, FALSE, 10.0, 10.0, &beans);
 	}
 	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
-		hc_url_clean(url);
 		g_prefix_error(&err, "M2 error: ");
 		return _reply_soft_error(rp, err);
 	}
@@ -886,7 +871,6 @@ action_m2_purge(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	GString *gstr = g_string_sized_new(512);
 	_json_dump_all_beans(gstr, url, beans);
 	_bean_cleanl2(beans);
-	hc_url_clean(url);
 	return _reply_success_json(rp, gstr);
 }
 
@@ -900,7 +884,6 @@ action_m2_exitelection(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		return m2v2_remote_execute_EXITELECTION(m2->host, NULL, url);
 	}
 	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
-		hc_url_clean(url);
 		g_prefix_error(&err, "M2 error: ");
 		return _reply_soft_error(rp, err);
 	}
@@ -914,10 +897,8 @@ action_m2_stgpol(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 {
 	(void) rq;
 	const gchar *stgpol = hc_url_get_option_value(url, "stgpol");
-	if (!stgpol) {
-		hc_url_clean(url);
+	if (!stgpol)
 		return _reply_format_error(rp, NEWERROR(400, "Missing storage policy"));
-	}
 
 	GSList *beans = NULL;
 	GError* hook (struct meta1_service_url_s *m2) {
@@ -925,7 +906,6 @@ action_m2_stgpol(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	}
 	GError *err;
 	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
-		hc_url_clean(url);
 		g_prefix_error(&err, "M2 error: ");
 		return _reply_soft_error(rp, err);
 	}
@@ -933,7 +913,6 @@ action_m2_stgpol(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	GString *gstr = g_string_sized_new(512);
 	_json_dump_all_beans(gstr, url, beans);
 	_bean_cleanl2(beans);
-	hc_url_clean(url);
 	return _reply_success_json(rp, gstr);
 }
 
@@ -950,7 +929,6 @@ action_m2_touch(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	}
 	GError *err;
 	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
-		hc_url_clean(url);
 		g_prefix_error(&err, "M2 error: ");
 		return _reply_soft_error(rp, err);
 	}
@@ -968,7 +946,6 @@ action_m2_copy(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	}
 	GError *err;
 	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
-		hc_url_clean(url);
 		g_prefix_error(&err, "M2 error: ");
 		return _reply_soft_error(rp, err);
 	}
