@@ -436,44 +436,6 @@ action_dir_status(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	return _reply_success_json(rp, gstr);
 }
 
-static enum http_rc_e
-handler_dir(gpointer u, struct http_request_s *rq, struct http_reply_ctx_s *rp)
-{
-	(void) u;
-
-	gchar *module = rq->req_uri + 1;
-	if (!g_str_has_prefix(module, "dir/"))
-		return HTTPRC_NEXT;
-
-	gchar *action = module + sizeof("dir/") - 1;
-	if (g_str_has_prefix(action, "list/"))
-		return action_dir_list(rq, rp, action + sizeof("list/") - 1);
-	if (g_str_has_prefix(action, "status"))
-		return action_dir_status(rq, rp, action + sizeof("status") - 1);
-
-	if (g_str_has_prefix(action, "flush/high"))
-		return action_dir_flush_high(rq, rp, action + sizeof("flush/high") - 1);
-	if (g_str_has_prefix(action, "flush/low"))
-		return action_dir_flush_low(rq, rp, action + sizeof("flush/low") - 1);
-
-	if (g_str_has_prefix(action, "set/ttl/high/"))
-		return action_dir_set_ttl_high(rq, rp, action + sizeof("set/ttl/high/") - 1);
-	if (g_str_has_prefix(action, "set/ttl/low/"))
-		return action_dir_set_ttl_low(rq, rp, action + sizeof("set/ttl/low/") - 1);
-	if (g_str_has_prefix(action, "set/max/high/"))
-		return action_dir_set_max_high(rq, rp, action + sizeof("set/max/high/") - 1);
-	if (g_str_has_prefix(action, "set/max/low/"))
-		return action_dir_set_max_low(rq, rp, action + sizeof("set/max/low/") - 1);
-
-	// TODO Implement these handlers
-	if (g_str_has_prefix(action, "link/"))
-		return action_dir_link(rq, rp, action + sizeof("link/") - 1);
-	if (g_str_has_prefix(action, "unlink/"))
-		return action_dir_unlink(rq, rp, action + sizeof("unlink/") - 1);
-
-	return _reply_no_handler(rp);
-}
-
 
 // META2 handler ---------------------------------------------------------------
 
@@ -498,12 +460,22 @@ _extract_m2_url(const gchar *uri, struct hc_url_s **rurl)
 		hc_url_set(url, HCURL_VERSION, *v ? v : NULL);
 		return NULL;
 	}
+	GError* _on_size(const gchar *v) {
+		hc_url_set_option(url, "size", *v ? v : NULL);
+		return NULL;
+	}
+	GError* _on_policy(const gchar *v) {
+		hc_url_set_option(url, "policy", *v ? v : NULL);
+		return NULL;
+	}
 
 	struct url_action_s actions[] = {
 		{"ns", _on_ns},
 		{"ref", _on_ref},
 		{"path", _on_path},
 		{"version", _on_version},
+		{"size", _on_size},
+		{"policy", _on_policy},
 		{NULL, NULL}
 	};
 	GError *e = _split_and_parse_url(uri, actions);
@@ -548,6 +520,56 @@ _single_get_v1(const gchar *m2v, struct hc_url_s *url, GSList **beans)
 	*beans = m2v2_beans_from_raw_content_v2("fake", raw);
 	meta2_raw_content_v2_clean(raw);
 	return NULL;
+}
+
+static GError*
+_multiple_list_v2(gchar **m2v, struct hc_url_s *url, GSList **beans)
+{
+	for (; m2v && *m2v ;++m2v) {
+		struct meta1_service_url_s *m2 = meta1_unpack_url(*m2v);
+		GError *err = m2v2_remote_execute_LIST(m2->host, NULL, url, 0, beans);
+		meta1_service_url_clean(m2);
+
+		if (!err) // M2V2 success
+			return NULL;
+
+		GRID_INFO("M2V2 error : (%d) %s", err->code, err->message);
+		g_prefix_error(&err, "M2V2 error: ");
+
+		if (err->code >= 400)
+			return err;
+		g_clear_error(&err);
+	}
+
+	return NEWERROR(500, "No META2 replied");
+}
+
+static GError*
+_multiple_beans_v2(gchar **m2v, struct hc_url_s *url, GSList **beans)
+{
+	gchar *end = NULL;
+	const gchar *strpol = hc_url_get_option_value(url, "policy");
+	const gchar *strsize = hc_url_get_option_value(url, "size");
+	gint64 size = g_ascii_strtoll(strsize, &end, 10);
+
+	for (; m2v && *m2v ;++m2v) {
+		struct meta1_service_url_s *m2 = meta1_unpack_url(*m2v);
+		GError *err = m2v2_remote_execute_BEANS(m2->host, NULL, url,
+				strpol, size, 0, beans);
+		meta1_service_url_clean(m2);
+
+		if (!err) // M2V2 success
+			return NULL;
+
+		GRID_INFO("M2V2 error : (%d) %s", err->code, err->message);
+		g_prefix_error(&err, "M2V2 error: ");
+
+		if (err->code >= 400)
+			return err;
+		g_clear_error(&err);
+	}
+
+	return NEWERROR(500, "No META2 replied");
 }
 
 static GError*
@@ -658,8 +680,27 @@ _json_chunks_only(GString *gstr, GSList *l)
 	_json_BEAN_only(gstr, l, &descr_struct_CHUNKS, code);
 }
 
+static void
+_json_dump_all_beans(GString *gstr, struct hc_url_s *url, GSList *beans)
+{
+	g_string_append_c(gstr, '{');
+	_append_status(gstr, 200, "OK");
+	g_string_append_c(gstr, ',');
+	_append_url(gstr, url);
+	g_string_append(gstr, ",\"aliases\":[");
+	_json_alias_only(gstr, beans);
+	g_string_append(gstr, "],\"headers\":[");
+	_json_headers_only(gstr, beans);
+	g_string_append(gstr, "],\"contents\":[");
+	_json_contents_only(gstr, beans);
+	g_string_append(gstr, "],\"chunks\":[");
+	_json_chunks_only(gstr, beans);
+	g_string_append_len(gstr, "]}", 2);
+}
+
 static GError *
-_resolve_m2_and_get(struct hc_resolver_s *r, struct hc_url_s *u, GSList **beans)
+_resolve_m2_and_get(struct hc_resolver_s *r, struct hc_url_s *u,
+		GSList **beans)
 {
 	gchar **m2v = NULL;
 	GError *err;
@@ -678,16 +719,119 @@ _resolve_m2_and_get(struct hc_resolver_s *r, struct hc_url_s *u, GSList **beans)
 	return err;
 }
 
+static GError *
+_resolve_m2_and_beans(struct hc_resolver_s *r, struct hc_url_s *u,
+		GSList **beans)
+{
+	gchar **m2v = NULL;
+	GError *err;
+
+	if (NULL != (err = hc_resolve_reference_service(r, u, "meta2", &m2v))) {
+		g_prefix_error(&err, "Resolution error: ");
+		return err;
+	}
+
+	if (!*m2v)
+		err = NEWERROR(CODE_CONTAINER_NOTFOUND, "No meta2 located");
+	else
+		err =  _multiple_beans_v2(m2v, u, beans);
+
+	g_strfreev(m2v);
+	return err;
+}
+
+static GError *
+_resolve_m2_and_list(struct hc_resolver_s *r, struct hc_url_s *u,
+		GSList **beans)
+{
+	gchar **m2v = NULL;
+	GError *err;
+
+	if (NULL != (err = hc_resolve_reference_service(r, u, "meta2", &m2v))) {
+		g_prefix_error(&err, "Resolution error: ");
+		return err;
+	}
+
+	if (!*m2v)
+		err = NEWERROR(CODE_CONTAINER_NOTFOUND, "No meta2 located");
+	else
+		err =  _multiple_list_v2(m2v, u, beans);
+
+	g_strfreev(m2v);
+	return err;
+}
+
+
 static enum http_rc_e
 action_m2_list(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		const gchar *uri)
 {
-	(void) rq, (void) rp, (void) uri;
-	return HTTPRC_ABORT;
+	struct hc_url_s *url = NULL;
+	GError *err;
+
+	if (g_ascii_strcasecmp(rq->cmd, "GET"))
+		return _reply_method_error(rp);
+	if (NULL != (err = _extract_m2_url(uri, &url)))
+		return _reply_format_error(rp, err);
+
+	if (!hc_url_has(url, HCURL_NS) || !hc_url_has(url, HCURL_REFERENCE)) {
+		hc_url_clean(url);
+		return _reply_format_error(rp, NEWERROR(400, "Partial URL"));
+	}
+	// TODO manage snapshot ?
+
+	GSList *beans = NULL;
+	if (NULL != (err = _resolve_m2_and_list(resolver, url, &beans))) {
+		hc_url_clean(url);
+		g_prefix_error(&err, "M2 error: ");
+		return _reply_soft_error(rp, err);
+	}
+
+	GString *gstr = g_string_sized_new(1024);
+	_json_dump_all_beans(gstr, url, beans);
+	_bean_cleanl2(beans);
+	hc_url_clean(url);
+	return _reply_success_json(rp, gstr);
 }
 
 static enum http_rc_e
 action_m2_get(struct http_request_s *rq, struct http_reply_ctx_s *rp,
+		const gchar *uri)
+{
+	struct hc_url_s *url = NULL;
+	GError *err;
+
+	if (g_ascii_strcasecmp(rq->cmd, "GET"))
+		return _reply_method_error(rp);
+	if (NULL != (err = _extract_m2_url(uri, &url)))
+		return _reply_format_error(rp, err);
+
+	if (!hc_url_has(url, HCURL_NS) || !hc_url_has(url, HCURL_REFERENCE)
+			|| !hc_url_has(url, HCURL_PATH)) {
+		hc_url_clean(url);
+		return _reply_format_error(rp, NEWERROR(400, "Partial URL"));
+	}
+	if (NULL == hc_url_get_option_value(url, "size")) {
+		hc_url_clean(url);
+		return _reply_format_error(rp, NEWERROR(400, "Missing size"));
+	}
+
+	GSList *beans = NULL;
+	if (NULL != (err = _resolve_m2_and_beans(resolver, url, &beans))) {
+		hc_url_clean(url);
+		g_prefix_error(&err, "M2 error: ");
+		return _reply_soft_error(rp, err);
+	}
+
+	GString *gstr = g_string_sized_new(512);
+	_json_dump_all_beans(gstr, url, beans);
+	_bean_cleanl2(beans);
+	hc_url_clean(url);
+	return _reply_success_json(rp, gstr);
+}
+
+static enum http_rc_e
+action_m2_beans(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		const gchar *uri)
 {
 	struct hc_url_s *url = NULL;
@@ -711,43 +855,11 @@ action_m2_get(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		return _reply_soft_error(rp, err);
 	}
 
-	// Prepare the header
 	GString *gstr = g_string_sized_new(512);
-	g_string_append_c(gstr, '{');
-	_append_status(gstr, 200, "OK");
-	g_string_append_c(gstr, ',');
-	_append_url(gstr, url);
-	g_string_append(gstr, ",\"aliases\":[");
-	_json_alias_only(gstr, beans);
-	g_string_append(gstr, "],\"headers\":[");
-	_json_headers_only(gstr, beans);
-	g_string_append(gstr, "],\"contents\":[");
-	_json_contents_only(gstr, beans);
-	g_string_append(gstr, "],\"chunks\":[");
-	_json_chunks_only(gstr, beans);
-	g_string_append_len(gstr, "]}", 2);
-
+	_json_dump_all_beans(gstr, url, beans);
 	_bean_cleanl2(beans);
 	hc_url_clean(url);
 	return _reply_success_json(rp, gstr);
-}
-
-static enum http_rc_e
-handler_m2(gpointer u, struct http_request_s *rq, struct http_reply_ctx_s *rp)
-{
-	(void) u;
-
-	gchar *module = rq->req_uri + 1;
-	if (!g_str_has_prefix(module, "m2/"))
-		return HTTPRC_NEXT;
-
-	gchar *action = module + sizeof("m2/") - 1;
-	if (g_str_has_prefix(action, "get/"))
-		return action_m2_get(rq, rp, action + sizeof("get/") - 1);
-	if (g_str_has_prefix(action, "list/"))
-		return action_m2_list(rq, rp, action + sizeof("list/") - 1);
-
-	return _reply_no_handler(rp);
 }
 
 
@@ -813,6 +925,13 @@ action_lb_sl(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	gchar *ns = NULL, *type = NULL;
 	struct service_info_s *si = NULL;
 
+	if (!METACD_LB_ENABLED) {
+		GError *err = NEWERROR(CODE_UNAVAILABLE,
+				"Load-balancer disabled by configuration");
+		return _reply_json(rp, CODE_UNAVAILABLE,
+				"Service unavailable", _create_status_error(err));
+	}
+
 	GError *err;
 	if (g_ascii_strcasecmp(rq->cmd, "GET"))
 		return _reply_method_error(rp);
@@ -840,29 +959,6 @@ action_lb_sl(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	g_free(ns);
 	g_free(type);
 	return _reply_success_json(rp, gstr);
-}
-
-static enum http_rc_e
-handler_lb(gpointer u, struct http_request_s *rq, struct http_reply_ctx_s *rp)
-{
-	(void) u;
-
-	gchar *module = rq->req_uri + 1;
-	if (!g_str_has_prefix(module, "lb/"))
-		return HTTPRC_NEXT;
-
-	if (!METACD_LB_ENABLED) {
-		GError *err = NEWERROR(CODE_UNAVAILABLE,
-				"Load-balancer disabled by configuration");
-		return _reply_json(rp, CODE_UNAVAILABLE,
-				"Service unavailable", _create_status_error(err));
-	}
-
-	gchar *action = module + sizeof("lb/") - 1;
-	if (g_str_has_prefix(action, "sl/"))
-		return action_lb_sl(rq, rp, action + sizeof("sl/") - 1);
-
-	return _reply_no_handler(rp);
 }
 
 
@@ -1075,62 +1171,28 @@ action_cs_clear(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	return _reply_success_json(rp, _create_status(200, "OK"));
 }
 
-static enum http_rc_e
-handler_cs(gpointer u, struct http_request_s *rq, struct http_reply_ctx_s *rp)
-{
-	(void) u;
-
-	gchar *module = rq->req_uri + 1;
-	if (!g_str_has_prefix(module, "cs/"))
-		return HTTPRC_NEXT;
-
-	gchar *action = module + sizeof("cs/") - 1;
-	if (g_str_has_prefix(action, "list/"))
-		return action_cs_list(rq, rp, action + sizeof("list/") - 1);
-	if (g_str_has_prefix(action, "reg/"))
-		return action_cs_reg(rq, rp, action + sizeof("reg/") - 1);
-	if (g_str_has_prefix(action, "lock/"))
-		return action_cs_lock(rq, rp, action + sizeof("lock/") - 1);
-	if (g_str_has_prefix(action, "unlock/"))
-		return action_cs_unlock(rq, rp, action + sizeof("unlock/") - 1);
-	if (g_str_has_prefix(action, "clear/"))
-		return action_cs_clear(rq, rp, action + sizeof("clear/") - 1);
-
-	return _reply_no_handler(rp);
-}
-
-
-// -----------------------------------------------------------------------------
+// Misc. handlers --------------------------------------------------------------
 
 static enum http_rc_e
-handler_check(gpointer u, struct http_request_s *rq, struct http_reply_ctx_s *rp)
+action_help(struct http_request_s *rq, struct http_reply_ctx_s *rp,
+		const gchar *uri)
 {
-	(void) u;
-	if (rq->req_uri[0] != '/') {
-		rp->set_status(400, "Bad request");
-		rp->finalize();
-		return HTTPRC_DONE;
-	}
-	return HTTPRC_NEXT;
-}
-
-static enum http_rc_e
-handler_help(gpointer u, struct http_request_s *rq, struct http_reply_ctx_s *rp)
-{
-	(void) u, (void) rq;
-
-	gchar *module = rq->req_uri + 1;
-	if (!g_str_has_prefix(module, "help"))
-		return HTTPRC_NEXT;
+	(void) rq, (void) uri;
 
 	GString *gstr = g_string_new("");
 	if (METACD_LB_ENABLED) {
 		g_string_append(gstr, "/lb/sl/ns/${NS}/type/${TYPE}\n");
 		g_string_append(gstr, "\tStateless load-balancing\n");
+		g_string_append_c(gstr, '\n');
 	}
 
 	g_string_append(gstr, "/m2/get/ns/${NS}/ref/${REF}/path/${PATH}\n");
-	g_string_append(gstr, "\tContent locating\n");
+	g_string_append(gstr, "\tContent location resolution\n");
+	g_string_append(gstr, "/m2/beans/ns/${NS}/ref/${REF}/path/${PATH}/size/${INT}[/policy/${POLICY}]\n");
+	g_string_append(gstr, "\tContent location provision\n");
+	g_string_append(gstr, "/m2/list/ns/${NS}/ref/${REF}\n");
+	g_string_append(gstr, "\tWhole container listing\n");
+	g_string_append_c(gstr, '\n');
 
 	g_string_append(gstr, "/dir/list/${NS}/ref/${REF}/type/${TYPE}\n");
 	g_string_append(gstr, "\tContainer service listing\n");
@@ -1140,14 +1202,58 @@ handler_help(gpointer u, struct http_request_s *rq, struct http_reply_ctx_s *rp)
 	g_string_append(gstr, "\tFlushes the meta1's cache.\n");
 	g_string_append(gstr, "/dir/flush/high\n");
 	g_string_append(gstr, "\tFlushes the conscience + meta0's cache.\n");
+	g_string_append_c(gstr, '\n');
 
-	g_string_append(gstr, "/dir/set/ttl/low/${INTEGER}\n");
-	g_string_append(gstr, "/dir/set/max/low/${INTEGER}\n");
-	g_string_append(gstr, "/dir/set/ttl/high/${INTEGER}\n");
-	g_string_append(gstr, "/dir/set/max/high/${INTEGER}\n");
+	g_string_append(gstr, "/dir/set/ttl/low/${INT}\n");
+	g_string_append(gstr, "/dir/set/max/low/${INT}\n");
+	g_string_append(gstr, "/dir/set/ttl/high/${INT}\n");
+	g_string_append(gstr, "/dir/set/max/high/${INT}\n");
 	g_string_append(gstr, "\tChange on the fly the configuration value.\n");
+	g_string_append_c(gstr, '\n');
+
 	return _reply_success_json(rp, gstr);
 }
+
+struct action_s
+{
+	const gchar *prefix;
+	enum http_rc_e (*hook) (struct http_request_s *rq,
+			struct http_reply_ctx_s *rp, const gchar *uri);
+} actions[] = {
+	{"lb/sl/",               action_lb_sl},
+	{"m2/get/",              action_m2_get},
+	{"m2/beans/",            action_m2_beans},
+	{"m2/list/",             action_m2_list},
+	{"dir/list/",            action_dir_list},
+	{"dir/link/",            action_dir_link},
+	{"dir/unlink/",          action_dir_unlink},
+	{"dir/status/",          action_dir_status},
+	{"cs/list/",             action_cs_list},
+	{"cs/reg/",              action_cs_reg},
+	{"cs/lock/",             action_cs_lock},
+	{"cs/unlock/",           action_cs_unlock},
+	{"cs/clear/",            action_cs_clear},
+	{"dir/flush/high/",      action_dir_flush_high},
+	{"dir/flush/low/",       action_dir_flush_low},
+	{"dir/set/ttl/high/",    action_dir_set_ttl_high},
+	{"dir/set/ttl/low/",     action_dir_set_ttl_low},
+	{"dir/set/max/high/",    action_dir_set_max_high},
+	{"dir/set/max/low/",     action_dir_set_max_low},
+	{"help",                 action_help},
+	{NULL,NULL}
+};
+
+static enum http_rc_e
+handler_action(gpointer u, struct http_request_s *rq, struct http_reply_ctx_s *rp)
+{
+	(void) u;
+	for (struct action_s *pa = actions; pa->prefix ;++pa) {
+		if (g_str_has_prefix(rq->req_uri + 1, pa->prefix))
+			return pa->hook(rq, rp, rq->req_uri + 1 + strlen(pa->prefix));
+	}
+	return _reply_no_handler(rp);
+}
+
 
 // Administrative tasks --------------------------------------------------------
 
@@ -1178,7 +1284,6 @@ _task_reload_lbpool(struct grid_lbpool_s *p)
 		g_clear_error(&err);
 	}
 }
-
 
 // MAIN callbacks --------------------------------------------------------------
 
@@ -1274,12 +1379,7 @@ static gboolean
 grid_main_configure(int argc, char **argv)
 {
 	static struct http_request_descr_s all_requests[] = {
-		{ "lb", handler_lb },
-		{ "m2", handler_m2 },
-		{ "dir", handler_dir },
-		{ "cs", handler_cs },
-		{ "check", handler_check },
-		{ "help", handler_help },
+		{ "action", handler_action },
 		{ NULL, NULL }
 	};
 
