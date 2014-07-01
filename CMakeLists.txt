@@ -141,6 +141,8 @@ else (PkgConfig_FOUND)
 endif (PkgConfig_FOUND)
 
 pkg_check_modules(GLIB2 REQUIRED glib-2.0 gthread-2.0 gmodule-2.0)
+pkg_check_modules(JSONC json)
+pkg_check_modules(JSONC json-c)
 
 ###--------------------------###
 ### Dependency to RedCurrant ###
@@ -164,18 +166,20 @@ include_directories(BEFORE
 
 include_directories(AFTER
 		${GLIB2_INCLUDE_DIRS}
-		${REDCURRANT_INCLUDE_DIRS})
+		${REDCURRANT_INCLUDE_DIRS}
+		${JSONC_INCLUDE_DIRS})
 
 link_directories(
 		${GLIB2_LIBRARY_DIRS}
-		${REDCURRANT_LIBRARY_DIRS})
+		${REDCURRANT_LIBRARY_DIRS}
+		${JSONC_LIBRARY_DIRS})
 
 add_executable(metacd_http metacd_http.c)
 
 target_link_libraries(metacd_http
 		metautils metacomm gridcluster server hcresolve
 		meta2v2remote meta2v2utils meta2servicesremote
-		${GLIB2_LIBRARIES})
+		${GLIB2_LIBRARIES} ${JSONC_LIBRARIES})
 
 install(TARGETS metacd_http 
 		LIBRARY DESTINATION ${LD_LIBDIR}
