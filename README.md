@@ -17,7 +17,8 @@ In the following description, a few ``${...}`` elements are presented. For each 
 ## Conscience operations
 
 ### Stateless load-balancing
-  * URL Prefix: ``/lb/sl/`` 
+  * Method: ``GET``
+  * URL Prefix: ``/lb/sl`` 
   * URL Options:
     * ``ns/${NS}``
     * ``type/${TYPE}``
@@ -25,16 +26,16 @@ In the following description, a few ``${...}`` elements are presented. For each 
 ## Meta2 operations
 
 ### Content location resolution
-
-  * URL Prefix: ``/m2/get/``
+  * Method: ``GET``
+  * URL Prefix: ``/m2/get``
   * URL Options:
     * ``ns/${NS}``
     * ``ref/${REF}``
     * ``path/${PATH}``
 
 ### Content location provision
-
-  * URL Prefix: ``/m2/beans/``
+  * Method: ``GET``
+  * URL Prefix: ``/m2/beans``
   * URL Options:
     * ``ns/${NS}``
     * ``ref/${REF}``
@@ -43,39 +44,112 @@ In the following description, a few ``${...}`` elements are presented. For each 
     * ``policy/${POLICY}`` OPTIONAL
 
 ### Whole container listing
-
-  * URL Prefix: ``/m2/list/``
+  * Method: ``GET``
+  * URL Prefix: ``/m2/list``
   * URL Options:
     * ``ns/${NS}``
     * ``ref/${REF}``
 
+### Container's presence check
+  * Method: ``GET``
+  * URL Prefix: ``/m2/has``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``ref/${REF}``
+
+### Create a container
+  * Method: ``POST``
+  * URL Prefix: ``/m2/create``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``ref/${REF}``
+
+### Destroy a container
+  * Method: ``POST``
+  * URL Prefix: ``/m2/destroy``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``ref/${REF}``
+
+### Open a container
+  * Method: ``POST``
+  * URL Prefix: ``/m2/open``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``ref/${REF}``
+
+### Close a container
+  * Method: ``POST``
+  * URL Prefix: ``/m2/close``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``ref/${REF}``
+
+### Purge a container
+  * Method: ``POST``
+  * URL Prefix: ``/m2/purge``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``ref/${REF}``
+
+### Deduplicate a container
+  * Method: ``POST``
+  * URL Prefix: ``/m2/dedup``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``ref/${REF}``
+
+### Copy a content
+  * Method: ``POST``
+  * URL Prefix: ``/m2/copy``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``ref/${REF}``
+    * ``path/${PATH}`` OPTIONAL, if present it concerns the content in the container.
+
+### Touches a container of a content
+  * Method: ``POST``
+  * URL Prefix: ``/m2/dedup``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``ref/${REF}``
+    * ``path/${PATH}`` OPTIONAL, if present it concerns the content in the container.
+
+### Storage policy change for a container or a content
+  * Method: ``POST``
+  * URL Prefix: ``/m2/stgpol``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``ref/${REF}``
+    * ``path/${PATH}`` OPTIONAL, if present it concerns the content in the container.
+
 ## High-level Directory operations
 
 ### Container service listing
-
-  * URL Prefix: ``/dir/list/``
+  * Method: ``GET``
+  * URL Prefix: ``/dir/list``
   * URL Options:
     * ``ns/${NS}``
     * ``ref/${REF}``
     * ``type/${TYPE}``
 
 ### Simple stats about the directory cache usage
-
+  * Method: ``GET``
   * URL Prefix: ``/dir/status``
 
 ### Flushes the meta1's cache.
-    
+  * Method: ``POST``
   * URL Prefix: ``/dir/flush/low``
 
 ### Flushes the conscience + meta0's cache.
-    
+  * Method: ``POST``
   * URL Prefix: ``/dir/flush/high``
 
 ### Set various limits on internal caches
-
-  * URL Prefix: ``/dir/set/ttl/low/``
-  * URL Prefix: ``/dir/set/max/low/``
-  * URL Prefix: ``/dir/set/ttl/high/``
-  * URL Prefix: ``/dir/set/max/high/``
+  * Method: ``POST``
+  * URL Prefix: ``/dir/set/ttl/low``
+  * URL Prefix: ``/dir/set/max/low``
+  * URL Prefix: ``/dir/set/ttl/high``
+  * URL Prefix: ``/dir/set/max/high``
   * URL Options:
     * ${INT}
