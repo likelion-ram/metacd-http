@@ -151,9 +151,6 @@ action_m2_get(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		struct hc_url_s *url)
 {
 	(void) rq;
-	if (NULL == hc_url_get_option_value(url, "size"))
-		return _reply_format_error(rp, NEWERROR(400, "Missing size"));
-
 	GError *err;
 	GSList *beans = NULL;
 	GError* hook(struct meta1_service_url_s *m2) {
