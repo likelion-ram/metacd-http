@@ -521,8 +521,12 @@ action_m2_put(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	json_object_put (jbody);
 	json_tokener_free (parser);
 
-	if (err)
-		return _reply_soft_error(rp, err);
+	if (err) {
+		if (err->code == 400)
+			return _reply_format_error(rp, err);
+		else
+			return _reply_system_error(rp, err);
+	}
 
 	GString *gstr = g_string_sized_new(512);
 	_json_dump_all_beans(gstr, url, beans);
@@ -547,7 +551,7 @@ action_m2_spare(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	json_tokener_free (parser);
 
 	if (err)
-		return _reply_soft_error(rp, err);
+		return _reply_format_error(rp, err);
 
 	GString *gstr = g_string_sized_new(512);
 	_json_dump_all_beans(gstr, url, beans);
@@ -572,7 +576,7 @@ action_m2_append(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	json_tokener_free (parser);
 
 	if (err)
-		return _reply_soft_error(rp, err);
+		return _reply_format_error(rp, err);
 
 	GString *gstr = g_string_sized_new(512);
 	_json_dump_all_beans(gstr, url, beans);
@@ -598,7 +602,7 @@ action_m2_overwrite(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	if (!err)
 		return _reply_success_json(rp, NULL);
 	else
-		return _reply_soft_error(rp, err);
+		return _reply_format_error(rp, err);
 }
 
 struct m2_action_s
