@@ -107,9 +107,9 @@ In the following description, a few ``${...}`` elements are presented. For each 
     * ``ref/${REF}``
     * ``path/${PATH}`` OPTIONAL, if present it concerns the content in the container.
 
-### Touches a container of a content
+### Touch a container of a content
   * Method: ``POST``
-  * URL Prefix: ``/m2/dedup``
+  * URL Prefix: ``/m2/touch``
   * URL Options:
     * ``ns/${NS}``
     * ``ref/${REF}``
@@ -137,11 +137,11 @@ In the following description, a few ``${...}`` elements are presented. For each 
   * Method: ``GET``
   * URL Prefix: ``/dir/status``
 
-### Flushes the meta1's cache.
+### Flush the meta1's cache.
   * Method: ``POST``
   * URL Prefix: ``/dir/flush/low``
 
-### Flushes the conscience + meta0's cache.
+### Flush the conscience + meta0's cache.
   * Method: ``POST``
   * URL Prefix: ``/dir/flush/high``
 
