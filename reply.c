@@ -78,6 +78,12 @@ _reply_format_error(struct http_reply_ctx_s *rp, GError *err)
 }
 
 static enum http_rc_e
+_reply_system_error(struct http_reply_ctx_s *rp, GError *err)
+{
+	return _reply_json(rp, 500, "Internal error", _create_status_error(err));
+}
+
+static enum http_rc_e
 _reply_method_error(struct http_reply_ctx_s *rp)
 {
 	return _reply_json(rp, 405, "Method not allowed", NULL);
