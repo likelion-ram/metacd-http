@@ -123,6 +123,22 @@ In the following description, a few ``${...}`` elements are presented. For each 
     * ``ref/${REF}``
     * ``path/${PATH}`` OPTIONAL, if present it concerns the content in the container.
 
+### Content PUT
+  * Method: ``POST``
+  * URL Prefix: ``/m2/put``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``ref/${REF}``
+    * ``path/${PATH}``
+
+### Content APPEND
+  * Method: ``POST``
+  * URL Prefix: ``/m2/append``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``ref/${REF}``
+    * ``path/${PATH}``
+
 ## High-level Directory operations
 
 ### Container service listing
