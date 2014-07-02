@@ -61,6 +61,9 @@ static guint dir_high_max = RESOLVD_DEFAULT_MAX_CSM0;
 
 #include "reply.c"
 #include "url.c"
+#include "json_input.c"
+#include "json_output.c"
+
 #include "dir_actions.c"
 #include "lb_actions.c"
 #include "cs_actions.c"
