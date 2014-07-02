@@ -1597,47 +1597,6 @@ action_cs_clear(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 
 // Misc. handlers --------------------------------------------------------------
 
-static enum http_rc_e
-action_help(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		const gchar *uri)
-{
-	(void) rq, (void) uri;
-
-	GString *gstr = g_string_new("");
-	if (METACD_LB_ENABLED) {
-		g_string_append(gstr, "/lb/sl/ns/${NS}/type/${TYPE}\n");
-		g_string_append(gstr, "\tStateless load-balancing\n");
-		g_string_append_c(gstr, '\n');
-	}
-
-	g_string_append(gstr, "/m2/get/ns/${NS}/ref/${REF}/path/${PATH}\n");
-	g_string_append(gstr, "\tContent location resolution\n");
-	g_string_append(gstr, "/m2/beans/ns/${NS}/ref/${REF}/path/${PATH}/size/${INT}[/policy/${POLICY}]\n");
-	g_string_append(gstr, "\tContent location provision\n");
-	g_string_append(gstr, "/m2/list/ns/${NS}/ref/${REF}\n");
-	g_string_append(gstr, "\tWhole container listing\n");
-	g_string_append_c(gstr, '\n');
-
-	g_string_append(gstr, "/dir/list/${NS}/ref/${REF}/type/${TYPE}\n");
-	g_string_append(gstr, "\tContainer service listing\n");
-	g_string_append(gstr, "/dir/status\n");
-	g_string_append(gstr, "\tSimple stats about the directory cache usage\n");
-	g_string_append(gstr, "/dir/flush/low\n");
-	g_string_append(gstr, "\tFlushes the meta1's cache.\n");
-	g_string_append(gstr, "/dir/flush/high\n");
-	g_string_append(gstr, "\tFlushes the conscience + meta0's cache.\n");
-	g_string_append_c(gstr, '\n');
-
-	g_string_append(gstr, "/dir/set/ttl/low/${INT}\n");
-	g_string_append(gstr, "/dir/set/max/low/${INT}\n");
-	g_string_append(gstr, "/dir/set/ttl/high/${INT}\n");
-	g_string_append(gstr, "/dir/set/max/high/${INT}\n");
-	g_string_append(gstr, "\tChange on the fly the configuration value.\n");
-	g_string_append_c(gstr, '\n');
-
-	return _reply_success_json(rp, gstr);
-}
-
 struct action_s
 {
 	const gchar *prefix;
@@ -1665,7 +1624,6 @@ struct action_s
 	{"cs/unlock/",           action_cs_unlock},
 	{"cs/clear/",            action_cs_clear},
 
-	{"help",                 action_help},
 	{NULL,NULL}
 };
 
