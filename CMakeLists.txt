@@ -174,7 +174,7 @@ link_directories(
 		${REDCURRANT_LIBRARY_DIRS}
 		${JSONC_LIBRARY_DIRS})
 
-add_executable(metacd_http metacd_http.c)
+add_executable(metacd_http server/metacd_http.c)
 
 target_link_libraries(metacd_http
 		metautils metacomm gridcluster server hcresolve
