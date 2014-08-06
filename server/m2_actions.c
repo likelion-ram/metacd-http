@@ -16,6 +16,35 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include <meta2v2/meta2_utils_json.h>
+
+void
+_json_dump_all_beans(GString *gstr, struct hc_url_s *url, GSList *beans)
+{
+	g_string_append_c(gstr, '{');
+	_append_status(gstr, 200, "OK");
+	g_string_append_c(gstr, ',');
+	_append_url(gstr, url);
+	g_string_append(gstr, ",");
+	meta2_json_dump_all_beans(gstr, beans);
+	g_string_append(gstr, "}");
+}
+
+GError *
+_jbody_to_beans(GSList **beans, struct json_object *jbody, const gchar *k)
+{
+	if (!json_object_is_type(jbody, json_type_object))
+		return NEWERROR(400, "Body is not a valid JSON object");
+
+	struct json_object *jbeans = json_object_object_get(jbody, k);
+	if (!jbeans)
+		return NEWERROR(400, "Section %s not found in JSON body", k);
+	if (!json_object_is_type(jbeans, json_type_object))
+		return NEWERROR(400, "Section %s from body is not a JSON object", k);
+
+	return meta2_json_object_to_beans(beans, jbeans);
+}
+
 static GError*
 _extract_m2_url(const gchar *uri, struct hc_url_s **rurl)
 {
@@ -225,6 +254,7 @@ action_m2_create(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		struct m2v2_create_params_s param = {
 			hc_url_get_option_value(url, "stgpol"),
 			hc_url_get_option_value(url, "verpol"),
+			FALSE
 		};
 		return m2v2_remote_execute_CREATE(m2->host, NULL, url, &param);
 	}
