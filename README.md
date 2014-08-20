@@ -23,6 +23,42 @@ In the following description, a few ``${...}`` elements are presented. For each 
     * ``ns/${NS}``
     * ``type/${TYPE}``
 
+### Service listing
+  * Method: ``GET``
+  * URL Prefix: ``/cs/list``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``type/${TYPE}``
+
+### Services flush
+  * Method: ``POST``
+  * URL Prefix: ``/cs/list``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``type/${TYPE}``
+
+### Service unlock
+  * Method: ``POST``
+  * URL Prefix: ``/cs/unlock``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``type/${TYPE}``
+    * ``url/${IP}:${PORT}``
+
+### Service lock
+  * Method: ``POST``
+  * URL Prefix: ``/cs/lock``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``type/${TYPE}``
+    * ``url/${IP}:${PORT}``
+    * ``score/${SCORE}``
+
+### Service registration
+  * Method: ``POST``
+  * URL Prefix: ``/cs/reg``
+
+
 ## Meta2 operations
 
 ### Content location resolution
