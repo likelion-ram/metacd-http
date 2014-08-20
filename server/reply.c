@@ -85,6 +85,8 @@ _reply_json(struct http_reply_ctx_s *rp, int code, const gchar *msg, GString *gs
 static enum http_rc_e
 _reply_soft_error(struct http_reply_ctx_s *rp, GError *err)
 {
+	if (err->code < 100)
+		err->code = CODE_UNAVAILABLE;
 	return _reply_json(rp, 200, "OK", _create_status_error(err));
 }
 
