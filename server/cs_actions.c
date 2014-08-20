@@ -71,53 +71,10 @@ cs_args_extract(const gchar *uri, struct cs_args_s *args)
 	return _split_and_parse_url(uri, actions);
 }
 
-static void
-_append_one_tag(GString* gstr, struct service_tag_s *tag)
-{
-	g_string_append_printf(gstr, "\"%s\":", tag->name);
-	switch (tag->type) {
-		case STVT_I64:
-			g_string_append_printf(gstr, "%"G_GINT64_FORMAT, tag->value.i);
-			return;
-		case STVT_REAL:
-			g_string_append_printf(gstr, "%f", tag->value.r);
-			return;
-		case STVT_BOOL:
-			g_string_append(gstr, tag->value.b ? "true" : "false");
-			return;
-		case STVT_STR:
-			g_string_append_printf(gstr, "\"%s\"", tag->value.s);
-			return;
-		case STVT_BUF:
-			g_string_append_printf(gstr, "\"%.*s\"",
-					(int) sizeof(tag->value.buf), tag->value.buf);
-			return;
-		case STVT_MACRO:
-			g_string_append_printf(gstr, "\"${%s}${%s}\"",
-					tag->value.macro.type, tag->value.macro.param);
-			return;
-	}
-}
-
-static void
-_append_all_tags(GString *gstr, GPtrArray *tags)
-{
-	if (!tags || !tags->len)
-		return;
-
-	guint i, max;
-	for (i=0,max=tags->len; i<max; ++i) {
-		if (i)
-			g_string_append_c(gstr, ',');
-		_append_one_tag(gstr, tags->pdata[i]);
-	}
-}
-
 static GString*
 _cs_pack_and_free_srvinfo_list(GSList *svc)
 {
 	GString *gstr = g_string_sized_new(64 + 32 * g_slist_length(svc));
-	gchar straddr[128];
 
 	g_string_append_c(gstr, '{');
 	_append_status(gstr, 200, "OK");
@@ -126,13 +83,7 @@ _cs_pack_and_free_srvinfo_list(GSList *svc)
 	for (GSList *l = svc; l ;l=l->next) {
 		if (l != svc)
 			g_string_append_c(gstr, ',');
-		struct service_info_s *si = l->data;
-		grid_addrinfo_to_string(&(si->addr), straddr, sizeof(straddr));
-		g_string_append_printf(gstr,
-				"{\"addr\":\"%s\",\"score\":%d,\"tags\":{",
-				straddr, si->score.value);
-		_append_all_tags(gstr, si->tags);
-		g_string_append(gstr, "}}");
+		service_info_encode_json(gstr, l->data);
 	}
 
 	g_string_append(gstr, "]}");
