@@ -42,6 +42,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <meta2v2/generic.h>
 #include <meta2/remote/meta2_services_remote.h>
 
+#define TOK_NS     1
+#define TOK_URL    2
+#define TOK_TYPE   4
+#define TOK_SCORE  8
+#define TOK_REF   16
+
+#define BADREQ(M,...) NEWERROR(CODE_BAD_REQUEST,M,##__VA_ARGS__)
+
 #ifndef RESOLVD_DEFAULT_TTL_SERVICES
 #define RESOLVD_DEFAULT_TTL_SERVICES 3600
 #endif
@@ -77,6 +85,8 @@ static guint dir_low_max =  RESOLVD_DEFAULT_MAX_SERVICES;
 static guint dir_high_ttl = RESOLVD_DEFAULT_TTL_CSM0;
 static guint dir_high_max = RESOLVD_DEFAULT_MAX_CSM0;
 
+static gboolean validate_namespace (const gchar *ns);
+
 #include "reply.c"
 #include "url.c"
 
@@ -93,28 +103,11 @@ struct action_s
 	enum http_rc_e (*hook) (struct http_request_s *rq,
 			struct http_reply_ctx_s *rp, const gchar *uri);
 } actions[] = {
-	{"lb/sl/",               action_lb_sl},
-
-	{"m2/",                  action_meta2},
-
-	{"dir/list/",            action_dir_list},
-	{"dir/link/",            action_dir_link},
-	{"dir/unlink/",          action_dir_unlink},
-	{"dir/status/",          action_dir_status},
-	{"dir/flush/high/",      action_dir_flush_high},
-	{"dir/flush/low/",       action_dir_flush_low},
-	{"dir/set/ttl/high/",    action_dir_set_ttl_high},
-	{"dir/set/ttl/low/",     action_dir_set_ttl_low},
-	{"dir/set/max/high/",    action_dir_set_max_high},
-	{"dir/set/max/low/",     action_dir_set_max_low},
-
-	{"cs/list/",             action_cs_list},
-	{"cs/reg/",              action_cs_reg},
-	{"cs/lock/",             action_cs_lock},
-	{"cs/unlock/",           action_cs_unlock},
-	{"cs/clear/",            action_cs_clear},
-
-	{NULL,NULL}
+	{ "lb/",  action_loadbalancing },
+	{ "m2/",  action_meta2 },
+	{ "cs/",  action_conscience },
+	{ "dir/", action_directory },
+	{ NULL, NULL }
 };
 
 static enum http_rc_e
@@ -128,6 +121,11 @@ handler_action(gpointer u, struct http_request_s *rq, struct http_reply_ctx_s *r
 	return _reply_no_handler(rp);
 }
 
+static gboolean
+validate_namespace (const gchar *ns)
+{
+	return 0 == strcmp(ns, nsname);
+}
 
 // Administrative tasks --------------------------------------------------------
 
@@ -285,7 +283,7 @@ grid_main_configure(int argc, char **argv)
 				(GDestroyNotify)_task_reload_lbpool, NULL, lbpool);
 	grid_task_queue_fire(admin_gtq);
 
-	network_server_bind_host_lowlatency(server, argv[0],
+	network_server_bind_host(server, argv[0],
 			dispatcher, transport_http_factory);
 
 	return TRUE;

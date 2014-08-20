@@ -18,7 +18,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <meta2v2/meta2_utils_json.h>
 
-void
+static void
 _json_dump_all_beans(GString *gstr, struct hc_url_s *url, GSList *beans)
 {
 	g_string_append_c(gstr, '{');
@@ -30,52 +30,65 @@ _json_dump_all_beans(GString *gstr, struct hc_url_s *url, GSList *beans)
 	g_string_append(gstr, "}");
 }
 
-GError *
+static GError *
 _jbody_to_beans(GSList **beans, struct json_object *jbody, const gchar *k)
 {
 	if (!json_object_is_type(jbody, json_type_object))
-		return NEWERROR(400, "Body is not a valid JSON object");
-
+		return BADREQ("Body is not a valid JSON object");
 	struct json_object *jbeans = json_object_object_get(jbody, k);
 	if (!jbeans)
-		return NEWERROR(400, "Section %s not found in JSON body", k);
+		return BADREQ("Section %s not found in JSON body", k);
 	if (!json_object_is_type(jbeans, json_type_object))
-		return NEWERROR(400, "Section %s from body is not a JSON object", k);
-
+		return BADREQ("Section %s from body is not a JSON object", k);
 	return meta2_json_object_to_beans(beans, jbeans);
 }
 
-static GError*
-_extract_m2_url(const gchar *uri, struct hc_url_s **rurl)
+struct m2_args_s
 {
-	struct hc_url_s *url = hc_url_empty();
+	struct hc_url_s *url;
 
+	const gchar *uri;
+	struct http_request_s *rq;
+	struct http_reply_ctx_s *rp;
+};
+
+static void
+m2_args_clear (struct m2_args_s *args)
+{
+	if (args->url)
+		hc_url_clean(args->url);
+	memset(args, 0, sizeof(struct m2_args_s));
+}
+
+static GError*
+m2_args_extract(const gchar *uri, struct m2_args_s *args)
+{
 	GError* _on_ns(const gchar *v) {
-		hc_url_set(url, HCURL_NS, *v ? v : NULL);
+		hc_url_set(args->url, HCURL_NS, *v ? v : NULL);
 		return NULL;
 	}
 	GError* _on_ref(const gchar *v) {
-		hc_url_set(url, HCURL_REFERENCE, *v ? v : NULL);
+		hc_url_set(args->url, HCURL_REFERENCE, *v ? v : NULL);
 		return NULL;
 	}
 	GError* _on_path(const gchar *v) {
-		hc_url_set(url, HCURL_PATH, *v ? v : NULL);
+		hc_url_set(args->url, HCURL_PATH, *v ? v : NULL);
 		return NULL;
 	}
 	GError* _on_version(const gchar *v) {
-		hc_url_set(url, HCURL_VERSION, *v ? v : NULL);
+		hc_url_set(args->url, HCURL_VERSION, *v ? v : NULL);
 		return NULL;
 	}
 	GError* _on_size(const gchar *v) {
-		hc_url_set_option(url, "size", *v ? v : NULL);
+		hc_url_set_option(args->url, "size", *v ? v : NULL);
 		return NULL;
 	}
 	GError* _on_stgpol(const gchar *v) {
-		hc_url_set_option(url, "stgpol", *v ? v : NULL);
+		hc_url_set_option(args->url, "stgpol", *v ? v : NULL);
 		return NULL;
 	}
 	GError* _on_verpol(const gchar *v) {
-		hc_url_set_option(url, "verpol", *v ? v : NULL);
+		hc_url_set_option(args->url, "verpol", *v ? v : NULL);
 		return NULL;
 	}
 
@@ -89,15 +102,7 @@ _extract_m2_url(const gchar *uri, struct hc_url_s **rurl)
 		{"verpol", _on_verpol},
 		{NULL, NULL}
 	};
-	GError *e = _split_and_parse_url(uri, actions);
-	if (e) {
-		hc_url_clean(url);
-		return e;
-	}
-	else {
-		*rurl = url;
-		return NULL;
-	}
+	return _split_and_parse_url(uri, actions);
 }
 
 static GError *
@@ -139,7 +144,8 @@ exit:
 }
 
 static GError*
-_single_get_v1(struct meta1_service_url_s *m2, struct hc_url_s *url, GSList **beans)
+_single_get_v1(struct meta1_service_url_s *m2, struct hc_url_s *url,
+		GSList **beans)
 {
 	int rc;
 	GError *err = NULL;
@@ -170,176 +176,158 @@ _single_get_v1(struct meta1_service_url_s *m2, struct hc_url_s *url, GSList **be
 }
 
 static enum http_rc_e
-action_m2_list(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		struct hc_url_s *url)
+action_m2_list (const struct m2_args_s *args)
 {
-	(void) rq;
 	// TODO manage snapshot ?
-
-	GError *err;
 	GSList *beans = NULL;
 	GError* hook(struct meta1_service_url_s *m2) {
-		return m2v2_remote_execute_LIST(m2->host, NULL, url, 0, &beans);
+		return m2v2_remote_execute_LIST(m2->host, NULL, args->url, 0, &beans);
 	}
-	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
+	GError *err;
+	if (NULL != (err = _resolve_m2_and_do(resolver, args->url, hook))) {
 		g_prefix_error(&err, "M2 error: ");
-		return _reply_soft_error(rp, err);
+		return _reply_soft_error(args->rp, err);
 	}
 
 	GString *gstr = g_string_sized_new(1024);
-	_json_dump_all_beans(gstr, url, beans);
+	_json_dump_all_beans(gstr, args->url, beans);
 	_bean_cleanl2(beans);
-	return _reply_success_json(rp, gstr);
+	return _reply_success_json(args->rp, gstr);
 }
 
 static enum http_rc_e
-action_m2_get(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		struct hc_url_s *url)
+action_m2_get (const struct m2_args_s *args)
 {
-	(void) rq;
 	GError *err;
 	GSList *beans = NULL;
 	GError* hook(struct meta1_service_url_s *m2) {
-		GError *e = m2v2_remote_execute_GET(m2->host, NULL, url, 0, &beans);
+		GError *e = m2v2_remote_execute_GET(m2->host, NULL, args->url, 0, &beans);
 		if (!e || e->code == 404)
 			return e;
 		GRID_INFO("M2V2 error : probably a M2V1");
 		g_clear_error(&e);
-		return _single_get_v1(m2, url, &beans);
+		return _single_get_v1(m2, args->url, &beans);
 	}
-	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
+	if (NULL != (err = _resolve_m2_and_do(resolver, args->url, hook))) {
 		g_prefix_error(&err, "M2 error: ");
-		return _reply_soft_error(rp, err);
+		return _reply_soft_error(args->rp, err);
 	}
 
 	GString *gstr = g_string_sized_new(512);
-	_json_dump_all_beans(gstr, url, beans);
+	_json_dump_all_beans(gstr, args->url, beans);
 	_bean_cleanl2(beans);
-	return _reply_success_json(rp, gstr);
+	return _reply_success_json(args->rp, gstr);
 }
 
 static enum http_rc_e
-action_m2_beans(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		struct hc_url_s *url)
+action_m2_beans(const struct m2_args_s *args)
 {
-	(void) rq;
 	gchar *end = NULL;
-	const gchar *strpol = hc_url_get_option_value(url, "policy");
-	const gchar *strsize = hc_url_get_option_value(url, "size");
+	const gchar *strpol = hc_url_get_option_value(args->url, "policy");
+	const gchar *strsize = hc_url_get_option_value(args->url, "size");
 	gint64 size = g_ascii_strtoll(strsize, &end, 10);
 
 	GError *err;
 	GSList *beans = NULL;
 	GError* hook (struct meta1_service_url_s *m2) {
-		return m2v2_remote_execute_BEANS(m2->host, NULL, url, strpol, size, 0, &beans);
+		return m2v2_remote_execute_BEANS(m2->host, NULL, args->url,
+				strpol, size, 0, &beans);
 	}
-	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
+	if (NULL != (err = _resolve_m2_and_do(resolver, args->url, hook))) {
 		g_prefix_error(&err, "M2 error: ");
-		return _reply_soft_error(rp, err);
+		return _reply_soft_error(args->rp, err);
 	}
 
 	GString *gstr = g_string_sized_new(512);
-	_json_dump_all_beans(gstr, url, beans);
+	_json_dump_all_beans(gstr, args->url, beans);
 	_bean_cleanl2(beans);
-	return _reply_success_json(rp, gstr);
+	return _reply_success_json(args->rp, gstr);
 }
 
 static enum http_rc_e
-action_m2_create(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		struct hc_url_s *url)
+action_m2_create (const struct m2_args_s *args)
 {
-	(void) rq;
 	GError *err;
 	GError* hook (struct meta1_service_url_s *m2) {
 		struct m2v2_create_params_s param = {
-			hc_url_get_option_value(url, "stgpol"),
-			hc_url_get_option_value(url, "verpol"),
+			hc_url_get_option_value(args->url, "stgpol"),
+			hc_url_get_option_value(args->url, "verpol"),
 			FALSE
 		};
-		return m2v2_remote_execute_CREATE(m2->host, NULL, url, &param);
+		return m2v2_remote_execute_CREATE(m2->host, NULL, args->url, &param);
 	}
-	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
+	if (NULL != (err = _resolve_m2_and_do(resolver, args->url, hook))) {
 		g_prefix_error(&err, "M2 error: ");
-		return _reply_soft_error(rp, err);
+		return _reply_soft_error(args->rp, err);
 	}
-	return _reply_success_json(rp, NULL);
+	return _reply_success_json(args->rp, NULL);
 }
 
 static enum http_rc_e
-action_m2_destroy(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		struct hc_url_s *url)
+action_m2_destroy (const struct m2_args_s *args)
 {
-	(void) rq;
 	GError *err;
 	GError* hook (struct meta1_service_url_s *m2) {
-		return m2v2_remote_execute_DESTROY(m2->host, NULL, url, 0);
+		return m2v2_remote_execute_DESTROY(m2->host, NULL, args->url, 0);
 	}
-	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
+	if (NULL != (err = _resolve_m2_and_do(resolver, args->url, hook))) {
 		g_prefix_error(&err, "M2 error: ");
-		return _reply_soft_error(rp, err);
+		return _reply_soft_error(args->rp, err);
 	}
-	return _reply_success_json(rp, NULL);
+	return _reply_success_json(args->rp, NULL);
 }
 
 static enum http_rc_e
-action_m2_open(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		struct hc_url_s *url)
+action_m2_open (const struct m2_args_s *args)
 {
-	(void) rq;
 	GError *err;
 	GError* hook (struct meta1_service_url_s *m2) {
-		return m2v2_remote_execute_OPEN(m2->host, NULL, url);
+		return m2v2_remote_execute_OPEN(m2->host, NULL, args->url);
 	}
-	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
+	if (NULL != (err = _resolve_m2_and_do(resolver, args->url, hook))) {
 		g_prefix_error(&err, "M2 error: ");
-		return _reply_soft_error(rp, err);
+		return _reply_soft_error(args->rp, err);
 	}
-	return _reply_success_json(rp, NULL);
+	return _reply_success_json(args->rp, NULL);
 }
 
 static enum http_rc_e
-action_m2_close(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		struct hc_url_s *url)
+action_m2_close (const struct m2_args_s *args)
 {
-	(void) rq;
 	GError *err;
 	GError* hook (struct meta1_service_url_s *m2) {
-		return m2v2_remote_execute_CLOSE(m2->host, NULL, url);
+		return m2v2_remote_execute_CLOSE(m2->host, NULL, args->url);
 	}
-	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
+	if (NULL != (err = _resolve_m2_and_do(resolver, args->url, hook))) {
 		g_prefix_error(&err, "M2 error: ");
-		return _reply_soft_error(rp, err);
+		return _reply_soft_error(args->rp, err);
 	}
-	return _reply_success_json(rp, NULL);
+	return _reply_success_json(args->rp, NULL);
 }
 
 static enum http_rc_e
-action_m2_has(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		struct hc_url_s *url)
+action_m2_has (const struct m2_args_s *args)
 {
-	(void) rq;
 	GError *err;
 	GError* hook (struct meta1_service_url_s *m2) {
-		return m2v2_remote_execute_HAS(m2->host, NULL, url);
+		return m2v2_remote_execute_HAS(m2->host, NULL, args->url);
 	}
-	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
+	if (NULL != (err = _resolve_m2_and_do(resolver, args->url, hook))) {
 		g_prefix_error(&err, "M2 error: ");
-		return _reply_soft_error(rp, err);
+		return _reply_soft_error(args->rp, err);
 	}
-	return _reply_success_json(rp, NULL);
+	return _reply_success_json(args->rp, NULL);
 }
 
 static enum http_rc_e
-action_m2_dedup(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		struct hc_url_s *url)
+action_m2_dedup (const struct m2_args_s *args)
 {
-	(void) rq;
 	GError *err;
 	gboolean first = TRUE;
 	GString *gstr = g_string_new("{\"\":[");
 	GError* hook (struct meta1_service_url_s *m2) {
 		gchar *msg = NULL;
-		GError *e = m2v2_remote_execute_DEDUP(m2->host, NULL, url, 0, &msg);
+		GError *e = m2v2_remote_execute_DEDUP(m2->host, NULL, args->url, 0, &msg);
 		if (msg) {
 			if (first) {
 				g_string_append_c(gstr, ',');
@@ -351,114 +339,105 @@ action_m2_dedup(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		}
 		return e;
 	}
-	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
+	if (NULL != (err = _resolve_m2_and_do(resolver, args->url, hook))) {
 		g_string_free(gstr, TRUE);
 		g_prefix_error(&err, "M2 error: ");
-		return _reply_soft_error(rp, err);
+		return _reply_soft_error(args->rp, err);
 	}
 
 	g_string_append(gstr, "]}");
-	return _reply_success_json(rp, gstr);
+	return _reply_success_json(args->rp, gstr);
 }
 
 static enum http_rc_e
-action_m2_purge(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		struct hc_url_s *url)
+action_m2_purge (const struct m2_args_s *args)
 {
-	(void) rq;
 	GError *err;
 	GSList *beans = NULL;
 	GError* hook (struct meta1_service_url_s *m2) {
-		return m2v2_remote_execute_PURGE(m2->host, NULL, url, FALSE, 10.0, 10.0, &beans);
+		return m2v2_remote_execute_PURGE(m2->host, NULL, args->url,
+				FALSE, 10.0, 10.0, &beans);
 	}
-	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
+	if (NULL != (err = _resolve_m2_and_do(resolver, args->url, hook))) {
 		g_prefix_error(&err, "M2 error: ");
-		return _reply_soft_error(rp, err);
+		return _reply_soft_error(args->rp, err);
 	}
 
 	GString *gstr = g_string_sized_new(512);
-	_json_dump_all_beans(gstr, url, beans);
+	_json_dump_all_beans(gstr, args->url, beans);
 	_bean_cleanl2(beans);
-	return _reply_success_json(rp, gstr);
+	return _reply_success_json(args->rp, gstr);
 }
 
 static enum http_rc_e
-action_m2_exitelection(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		struct hc_url_s *url)
+action_m2_exitelection (const struct m2_args_s *args)
 {
-	(void) rq;
 	GError *err;
 	GError* hook (struct meta1_service_url_s *m2) {
-		return m2v2_remote_execute_EXITELECTION(m2->host, NULL, url);
+		return m2v2_remote_execute_EXITELECTION(m2->host, NULL, args->url);
 	}
-	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
+	if (NULL != (err = _resolve_m2_and_do(resolver, args->url, hook))) {
 		g_prefix_error(&err, "M2 error: ");
-		return _reply_soft_error(rp, err);
+		return _reply_soft_error(args->rp, err);
 	}
 
-	return _reply_success_json(rp, NULL);
+	return _reply_success_json(args->rp, NULL);
 }
 
 static enum http_rc_e
-action_m2_stgpol(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		struct hc_url_s *url)
+action_m2_stgpol (const struct m2_args_s *args)
 {
-	(void) rq;
-	const gchar *stgpol = hc_url_get_option_value(url, "stgpol");
+	const gchar *stgpol = hc_url_get_option_value(args->url, "stgpol");
 	if (!stgpol)
-		return _reply_format_error(rp, NEWERROR(400, "Missing storage policy"));
+		return _reply_format_error(args->rp, BADREQ("Missing STGPOL"));
 
 	GSList *beans = NULL;
 	GError* hook (struct meta1_service_url_s *m2) {
-		return m2v2_remote_execute_STGPOL(m2->host, NULL, url, stgpol, &beans);
+		return m2v2_remote_execute_STGPOL(m2->host, NULL, args->url, stgpol, &beans);
 	}
 	GError *err;
-	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
+	if (NULL != (err = _resolve_m2_and_do(resolver, args->url, hook))) {
 		g_prefix_error(&err, "M2 error: ");
-		return _reply_soft_error(rp, err);
+		return _reply_soft_error(args->rp, err);
 	}
 
 	GString *gstr = g_string_sized_new(512);
-	_json_dump_all_beans(gstr, url, beans);
+	_json_dump_all_beans(gstr, args->url, beans);
 	_bean_cleanl2(beans);
-	return _reply_success_json(rp, gstr);
+	return _reply_success_json(args->rp, gstr);
 }
 
 static enum http_rc_e
-action_m2_touch(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		struct hc_url_s *url)
+action_m2_touch (const struct m2_args_s *args)
 {
-	(void) rq;
 	GError* hook (struct meta1_service_url_s *m2) {
-		if (hc_url_has(url, HCURL_PATH))
-			return m2v2_remote_touch_content(m2->host, NULL, url);
+		if (hc_url_has(args->url, HCURL_PATH))
+			return m2v2_remote_touch_content(m2->host, NULL, args->url);
 		else
-			return m2v2_remote_touch_container_ex(m2->host, NULL, url, 0);
+			return m2v2_remote_touch_container_ex(m2->host, NULL, args->url, 0);
 	}
 	GError *err;
-	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
+	if (NULL != (err = _resolve_m2_and_do(resolver, args->url, hook))) {
 		g_prefix_error(&err, "M2 error: ");
-		return _reply_soft_error(rp, err);
+		return _reply_soft_error(args->rp, err);
 	}
 
-	return _reply_success_json(rp, NULL);
+	return _reply_success_json(args->rp, NULL);
 }
 
 static enum http_rc_e
-action_m2_copy(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		struct hc_url_s *url)
+action_m2_copy (const struct m2_args_s *args)
 {
-	(void) rq;
 	GError* hook (struct meta1_service_url_s *m2) {
-		return m2v2_remote_execute_COPY(m2->host, NULL, url, "NYI");
+		return m2v2_remote_execute_COPY(m2->host, NULL, args->url, "NYI");
 	}
 	GError *err;
-	if (NULL != (err = _resolve_m2_and_do(resolver, url, hook))) {
+	if (NULL != (err = _resolve_m2_and_do(resolver, args->url, hook))) {
 		g_prefix_error(&err, "M2 error: ");
-		return _reply_soft_error(rp, err);
+		return _reply_soft_error(args->rp, err);
 	}
 
-	return _reply_success_json(rp, NULL);
+	return _reply_success_json(args->rp, NULL);
 }
 
 static GError *
@@ -553,8 +532,7 @@ _m2_json_overwrite(struct hc_url_s *url, struct json_object *jbody)
 }
 
 static enum http_rc_e
-action_m2_put(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		struct hc_url_s *url)
+action_m2_put (const struct m2_args_s *args)
 {
 	struct json_tokener *parser;
 	struct json_object *jbody;
@@ -562,28 +540,27 @@ action_m2_put(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	GError *err;
 
 	parser = json_tokener_new ();
-	g_byte_array_append (rq->body, (guint8*)"", 1);
-	jbody = json_tokener_parse((gchar*) rq->body->data);
-	err = _m2_json_put(url, jbody, &beans);
+	g_byte_array_append (args->rq->body, (guint8*)"", 1);
+	jbody = json_tokener_parse((gchar*) args->rq->body->data);
+	err = _m2_json_put(args->url, jbody, &beans);
 	json_object_put (jbody);
 	json_tokener_free (parser);
 
 	if (err) {
 		if (err->code == 400)
-			return _reply_format_error(rp, err);
+			return _reply_format_error(args->rp, err);
 		else
-			return _reply_system_error(rp, err);
+			return _reply_system_error(args->rp, err);
 	}
 
 	GString *gstr = g_string_sized_new(512);
-	_json_dump_all_beans(gstr, url, beans);
+	_json_dump_all_beans(gstr, args->url, beans);
 	_bean_cleanl2 (beans);
-	return _reply_success_json(rp, gstr);
+	return _reply_success_json(args->rp, gstr);
 }
 
 static enum http_rc_e
-action_m2_spare(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		struct hc_url_s *url)
+action_m2_spare (const struct m2_args_s *args)
 {
 	struct json_tokener *parser;
 	struct json_object *jbody;
@@ -591,24 +568,23 @@ action_m2_spare(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	GError *err;
 
 	parser = json_tokener_new ();
-	g_byte_array_append (rq->body, (guint8*)"", 1);
-	jbody = json_tokener_parse((gchar*) rq->body->data);
-	err = _m2_json_spare(url, jbody, &beans);
+	g_byte_array_append (args->rq->body, (guint8*)"", 1);
+	jbody = json_tokener_parse((gchar*) args->rq->body->data);
+	err = _m2_json_spare(args->url, jbody, &beans);
 	json_object_put (jbody);
 	json_tokener_free (parser);
 
 	if (err)
-		return _reply_format_error(rp, err);
+		return _reply_format_error(args->rp, err);
 
 	GString *gstr = g_string_sized_new(512);
-	_json_dump_all_beans(gstr, url, beans);
+	_json_dump_all_beans(gstr, args->url, beans);
 	_bean_cleanl2 (beans);
-	return _reply_success_json(rp, gstr);
+	return _reply_success_json(args->rp, gstr);
 }
 
 static enum http_rc_e
-action_m2_append(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		struct hc_url_s *url)
+action_m2_append (const struct m2_args_s *args)
 {
 	struct json_tokener *parser;
 	struct json_object *jbody;
@@ -616,48 +592,46 @@ action_m2_append(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	GError *err;
 
 	parser = json_tokener_new ();
-	g_byte_array_append (rq->body, (guint8*)"", 1);
-	jbody = json_tokener_parse((gchar*) rq->body->data);
-	err = _m2_json_append(url, jbody, &beans);
+	g_byte_array_append (args->rq->body, (guint8*)"", 1);
+	jbody = json_tokener_parse((gchar*) args->rq->body->data);
+	err = _m2_json_append(args->url, jbody, &beans);
 	json_object_put (jbody);
 	json_tokener_free (parser);
 
 	if (err)
-		return _reply_format_error(rp, err);
+		return _reply_format_error(args->rp, err);
 
 	GString *gstr = g_string_sized_new(512);
-	_json_dump_all_beans(gstr, url, beans);
+	_json_dump_all_beans(gstr, args->url, beans);
 	_bean_cleanl2 (beans);
-	return _reply_success_json(rp, gstr);
+	return _reply_success_json(args->rp, gstr);
 }
 
 static enum http_rc_e
-action_m2_overwrite(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		struct hc_url_s *url)
+action_m2_overwrite (const struct m2_args_s *args)
 {
 	struct json_tokener *parser;
 	struct json_object *jbody;
 	GError *err;
 
 	parser = json_tokener_new ();
-	g_byte_array_append (rq->body, (guint8*)"", 1);
-	jbody = json_tokener_parse((gchar*) rq->body->data);
-	err = _m2_json_overwrite(url, jbody);
+	g_byte_array_append (args->rq->body, (guint8*)"", 1);
+	jbody = json_tokener_parse((gchar*) args->rq->body->data);
+	err = _m2_json_overwrite(args->url, jbody);
 	json_object_put (jbody);
 	json_tokener_free (parser);
 
 	if (!err)
-		return _reply_success_json(rp, NULL);
+		return _reply_success_json(args->rp, NULL);
 	else
-		return _reply_format_error(rp, err);
+		return _reply_format_error(args->rp, err);
 }
 
-struct m2_action_s
+static struct m2_action_s
 {
 	const gchar *method;
 	const gchar *prefix;
-	enum http_rc_e (*hook) (struct http_request_s *rq,
-			struct http_reply_ctx_s *rp, struct hc_url_s *url);
+	enum http_rc_e (*hook) (const struct m2_args_s *args);
 	unsigned int expect_path;
 } m2_actions[] = {
 	{ "GET",  "get/",          action_m2_get,          1},
@@ -682,35 +656,50 @@ struct m2_action_s
 };
 
 static enum http_rc_e
+action_meta2_real (struct m2_action_s *pa, struct m2_args_s *args)
+{
+	if (!hc_url_has(args->url, HCURL_NS))
+		return _reply_format_error(args->rp, BADREQ("Missing NS"));
+	if (!hc_url_has(args->url, HCURL_REFERENCE))
+		return _reply_format_error(args->rp, BADREQ("Missing REF"));
+	if (pa->expect_path && !hc_url_has(args->url, HCURL_PATH))
+		return _reply_format_error(args->rp, BADREQ("Missing PATH"));
+	if (!validate_namespace(hc_url_get(args->url, HCURL_NSPHYS)))
+		return _reply_soft_error(args->rp, NEWERROR(
+			CODE_NAMESPACE_NOTMANAGED, "Invalid NS"));
+	return pa->hook(args);
+}
+
+static enum http_rc_e
 action_meta2(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		const gchar *uri)
 {
+	gboolean matched = FALSE;
 	for (struct m2_action_s *pa = m2_actions; pa->prefix ;++pa) {
 		if (!g_str_has_prefix(uri, pa->prefix))
 			continue;
-
-		uri += strlen(pa->prefix);
+		matched = TRUE;
 		if (0 != strcmp(rq->cmd, pa->method))
-			return _reply_method_error(rp);
+			continue;
+
+		struct m2_args_s args;
+		args.url = hc_url_empty();
+		args.uri = uri + strlen(pa->prefix);
+		args.rq = rq;
+		args.rp = rp;
 
 		GError *err;
-		struct hc_url_s *url = NULL;
-		if (NULL != (err = _extract_m2_url(uri, &url)))
-			return _reply_format_error(rp, err);
-
-		if (!hc_url_has(url, HCURL_NS) || !hc_url_has(url, HCURL_REFERENCE)) {
-			hc_url_clean(url);
-			return _reply_format_error(rp, NEWERROR(400, "Missing NS/REF in url"));
-		}
-		if (pa->expect_path && !hc_url_has(url, HCURL_PATH)) {
-			hc_url_clean(url);
-			return _reply_format_error(rp, NEWERROR(400, "Missing PATH in url"));
-		}
-
-		enum http_rc_e e = pa->hook(rq, rp, url);
-		hc_url_clean(url);
+		enum http_rc_e e;
+		if (NULL != (err = m2_args_extract(args.uri, &args)))
+			e = _reply_format_error(rp, err);
+		else
+			e = action_meta2_real(pa, &args);
+		m2_args_clear(&args);
 		return e;
 	}
+
+	if (matched)
+		return _reply_method_error(rp);
 	return _reply_no_handler(rp);
 }
 

@@ -16,34 +16,45 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-static GError*
-_extract_lb_args(const gchar *args, gchar **rns, gchar **rtype)
+struct lb_args_s
 {
-	gchar *ns = NULL, *type = NULL;
+	gchar *ns;
+	gchar *type;
 
-	void _clean(gchar **ps) { if (*ps) g_free(*ps); *ps = NULL; }
-	void _repl(gchar **ps, const gchar *v) { _clean(ps); *ps = g_strdup(v); }
-	GError* _on_ns(const gchar *v) { _repl(&ns, v); return NULL; }
-	GError* _on_type(const gchar *v) { _repl(&type, v); return NULL; }
+	const gchar *uri;
+	struct http_request_s *rq;
+	struct http_reply_ctx_s *rp;
+};
 
+static void
+lb_args_clear (struct lb_args_s *args)
+{
+	if (args->ns)
+		g_free(args->ns);
+	if (args->type)
+		g_free(args->type);
+	memset(args, 0, sizeof(struct lb_args_s));
+}
+
+static GError*
+lb_args_extract(const gchar *uri, struct lb_args_s *args)
+{
+	GError* _on_ns(const gchar *v) {
+		gchar pns[LIMIT_LENGTH_NSNAME+1];
+		metautils_strlcpy_physical_ns(pns, v, sizeof(pns));
+		metautils_str_replace(&args->ns, pns);
+		return NULL;
+	}
+	GError* _on_type(const gchar *v) {
+		metautils_str_replace(&args->type, *v ? v : NULL);
+		return NULL;
+	}
 	struct url_action_s actions[] = {
 		{"ns", _on_ns},
 		{"type", _on_type},
 		{NULL, NULL}
 	};
-	GError *err = _split_and_parse_url(args, actions);
-	if (!err && (!ns || !*ns))
-		err = NEWERROR(400, "Missing namespace");
-	if (!err && (!type || !*type))
-		err = NEWERROR(400, "Missing service type");
-	if (err) {
-		_clean(&ns);
-		_clean(&type);
-		return err;
-	}
-	*rtype = type;
-	*rns = ns;
-	return NULL;
+	return _split_and_parse_url(uri, actions);
 }
 
 static GString *
@@ -54,7 +65,8 @@ _lb_pack_and_free_srvinfo_list(const gchar *ns, const gchar *type, GSList *svc)
 
 	g_string_append_c(gstr, '{');
 	_append_status(gstr, 200, "OK");
-	g_string_append_printf(gstr, ",\"ns\":\"%s\",\"type\":\"%s\",\"srv\":[", ns, type);
+	g_string_append_printf(gstr, ",\"ns\":\"%s\",\"type\":\"%s\","
+			"\"srv\":[", ns, type);
 
 	for (GSList *l = svc; l ;l=l->next) {
 		if (l != svc)
@@ -70,12 +82,31 @@ _lb_pack_and_free_srvinfo_list(const gchar *ns, const gchar *type, GSList *svc)
 }
 
 static enum http_rc_e
-action_lb_sl(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		const gchar *args)
+action_lb_sl(const struct lb_args_s *args)
 {
-	gchar *ns = NULL, *type = NULL;
-	struct service_info_s *si = NULL;
+	struct grid_lb_iterator_s *iter;
 
+	if (!(iter = grid_lbpool_get_iterator(lbpool, args->type))) {
+		return _reply_soft_error(args->rp, NEWERROR(460, "Type not managed"));
+	}
+
+	struct service_info_s *si = NULL;
+	if (!grid_lb_iterator_next(iter, &si)) {
+		service_info_clean(si);
+		return _reply_soft_error(args->rp, NEWERROR(
+					CODE_POLICY_NOT_SATISFIABLE, "Type not available"));
+	}
+
+	GString *gstr = _lb_pack_and_free_srvinfo_list(args->ns, args->type,
+			g_slist_prepend(NULL, si));
+	service_info_clean(si);
+	return _reply_success_json(args->rp, gstr);
+}
+
+static enum http_rc_e
+action_loadbalancing (struct http_request_s *rq, struct http_reply_ctx_s *rp,
+		const gchar *uri)
+{
 	if (!METACD_LB_ENABLED) {
 		GError *err = NEWERROR(CODE_UNAVAILABLE,
 				"Load-balancer disabled by configuration");
@@ -83,32 +114,28 @@ action_lb_sl(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 				"Service unavailable", _create_status_error(err));
 	}
 
-	GError *err;
-	if (g_ascii_strcasecmp(rq->cmd, "GET"))
+	if (!g_str_has_prefix(uri, "sl/"))
+		return _reply_no_handler(rp);
+	if (0 != g_ascii_strcasecmp(rq->cmd, "GET"))
 		return _reply_method_error(rp);
-	if (NULL != (err = _extract_lb_args(args, &ns, &type)))
-		return _reply_format_error(rp, err);
 
-	struct grid_lb_iterator_s *iter = grid_lbpool_get_iterator(lbpool, type);
-	if (!iter) {
-		g_free(ns);
-		g_free(type);
-		return _reply_soft_error(rp, NEWERROR(460, "Type not managed"));
+	struct lb_args_s args;
+	memset(&args, 0, sizeof(struct lb_args_s));
+	args.uri = uri + strlen("sl/");
+	args.rq = rq;
+	args.rp = rp;
+
+	GError *err;
+	enum http_rc_e e;
+	if (!validate_namespace(args.ns)) {
+		e = _reply_soft_error(rp, NEWERROR(
+					CODE_NAMESPACE_NOTMANAGED, "Invalid NS"));
+	} else if (NULL != (err = lb_args_extract(uri, &args))) {
+		e = _reply_format_error(rp, err);
+	} else {
+		e = action_lb_sl(&args);
 	}
-
-	if (!grid_lb_iterator_next(iter, &si)) {
-		g_free(ns);
-		g_free(type);
-		service_info_clean(si);
-		return _reply_soft_error(rp, NEWERROR(CODE_POLICY_NOT_SATISFIABLE,
-					"Type not available"));
-	}
-
-	GString *gstr = _lb_pack_and_free_srvinfo_list(ns, type,
-			g_slist_prepend(NULL, si));
-
-	g_free(ns);
-	g_free(type);
-	return _reply_success_json(rp, gstr);
+	lb_args_clear(&args);
+	return e;
 }
 
