@@ -278,34 +278,6 @@ action_m2_destroy (const struct m2_args_s *args)
 }
 
 static enum http_rc_e
-action_m2_open (const struct m2_args_s *args)
-{
-	GError *err;
-	GError* hook (struct meta1_service_url_s *m2) {
-		return m2v2_remote_execute_OPEN(m2->host, NULL, args->url);
-	}
-	if (NULL != (err = _resolve_m2_and_do(resolver, args->url, hook))) {
-		g_prefix_error(&err, "M2 error: ");
-		return _reply_soft_error(args->rp, err);
-	}
-	return _reply_success_json(args->rp, NULL);
-}
-
-static enum http_rc_e
-action_m2_close (const struct m2_args_s *args)
-{
-	GError *err;
-	GError* hook (struct meta1_service_url_s *m2) {
-		return m2v2_remote_execute_CLOSE(m2->host, NULL, args->url);
-	}
-	if (NULL != (err = _resolve_m2_and_do(resolver, args->url, hook))) {
-		g_prefix_error(&err, "M2 error: ");
-		return _reply_soft_error(args->rp, err);
-	}
-	return _reply_success_json(args->rp, NULL);
-}
-
-static enum http_rc_e
 action_m2_has (const struct m2_args_s *args)
 {
 	GError *err;
@@ -540,8 +512,8 @@ action_m2_put (const struct m2_args_s *args)
 	GError *err;
 
 	parser = json_tokener_new ();
-	g_byte_array_append (args->rq->body, (guint8*)"", 1);
-	jbody = json_tokener_parse((gchar*) args->rq->body->data);
+	jbody = json_tokener_parse_ex(parser, (char*) args->rq->body->data,
+			args->rq->body->len);
 	err = _m2_json_put(args->url, jbody, &beans);
 	json_object_put (jbody);
 	json_tokener_free (parser);
@@ -640,8 +612,6 @@ static struct m2_action_s
 	{ "GET",  "has/",          action_m2_has,          0},
 	{ "POST", "create/",       action_m2_create,       0},
 	{ "POST", "destroy/",      action_m2_destroy,      0},
-	{ "POST", "open/",         action_m2_open,         0},
-	{ "POST", "close/",        action_m2_close,        0},
 	{ "POST", "purge/",        action_m2_purge,        0},
 	{ "POST", "dedup/",        action_m2_dedup,        0},
 	{ "POST", "stgpol/",       action_m2_stgpol,       0},
