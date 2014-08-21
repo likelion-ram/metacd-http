@@ -23,6 +23,12 @@ In the following description, a few ``${...}`` elements are presented. For each 
     * ``ns/${NS}``
     * ``type/${TYPE}``
 
+### Namespace configuration
+  * Method: ``GET``
+  * URL Prefix: ``/cs/info``
+  * URL Options:
+    * ``ns/${NS}``
+
 ### Service listing
   * Method: ``GET``
   * URL Prefix: ``/cs/list``
