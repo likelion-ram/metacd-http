@@ -105,6 +105,21 @@ action_cs_list (const struct cs_args_s *args)
 }
 
 static enum http_rc_e
+action_cs_info (const struct cs_args_s *args)
+{
+	struct namespace_info_s ni;
+	memset(&ni, 0, sizeof(ni));
+	g_static_mutex_lock(&nsinfo_mutex);
+	namespace_info_copy(&nsinfo, &ni, NULL);
+	g_static_mutex_unlock(&nsinfo_mutex);
+
+	GString *gstr = g_string_sized_new(1024);
+	namespace_info_encode_json(gstr, &ni);
+	namespace_info_clear(&ni);
+	return _reply_success_json(args->rp, gstr);
+}
+
+static enum http_rc_e
 action_cs_reg (const struct cs_args_s *args)
 {
 	(void) args;
@@ -144,11 +159,12 @@ static struct cs_action_s
 	enum http_rc_e (*hook) (const struct cs_args_s *args);
 	unsigned int expectations;
 } cs_actions[] = {
+	{ "GET",  "list/",   action_cs_list,   TOK_NS|TOK_TYPE },
+	{ "GET",  "info/",   action_cs_info,   TOK_NS },
 	{ "POST", "clear/",  action_cs_clear,  TOK_NS|TOK_TYPE },
 	{ "POST", "unlock/", action_cs_unlock, TOK_NS|TOK_TYPE|TOK_URL },
 	{ "POST", "lock/",   action_cs_lock,   TOK_NS|TOK_TYPE|TOK_URL|TOK_SCORE },
 	{ "POST", "reg/",    action_cs_reg,    TOK_NS|TOK_TYPE|TOK_URL },
-	{ "GET",  "list/",   action_cs_list,   TOK_NS|TOK_TYPE },
 	{ NULL, NULL, NULL, 0 }
 };
 

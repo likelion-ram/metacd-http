@@ -76,7 +76,11 @@ static struct grid_lbpool_s *lbpool = NULL;
 static struct grid_task_queue_s *admin_gtq = NULL;
 static GThread *admin_thread = NULL;
 
+static GStaticMutex nsinfo_mutex;
+static struct namespace_info_s nsinfo;
+
 // Configuration
+static guint nsinfo_refresh_delay = 10;
 static gint lb_refresh_delay = 10;
 #define METACD_LB_ENABLED (lb_refresh_delay >= 0)
 
@@ -157,6 +161,24 @@ _task_reload_lbpool(struct grid_lbpool_s *p)
 	}
 }
 
+static void
+_task_reload_nsinfo(gpointer p)
+{
+	(void) p;
+	GError *err = NULL;
+	struct namespace_info_s *ni;
+
+	if (!(ni = get_namespace_info(nsname, &err))) {
+		GRID_WARN("NSINFO reload error [%s] : (%d) %s",
+				nsname, err->code, err->message);
+		g_clear_error(&err);
+	} else {
+		g_static_mutex_lock(&nsinfo_mutex);
+		namespace_info_copy(ni, &nsinfo, NULL);
+		g_static_mutex_unlock(&nsinfo_mutex);
+		namespace_info_free(ni);
+	}
+}
 // MAIN callbacks --------------------------------------------------------------
 
 static void
@@ -196,6 +218,8 @@ grid_main_get_options(void)
 		{"LbRefresh", OT_INT, {.i=&lb_refresh_delay},
 			"Interval between load-balancer service refreshes (seconds)\n"
 				"\t\t-1 to disable, 0 to never refresh"},
+		{"NsinfoRefresh", OT_UINT, {.u=&nsinfo_refresh_delay},
+			"Interval between NS configuration's refreshes (seconds)"},
 		{"DirLowTtl", OT_UINT, {.u=&dir_low_ttl},
 			"Directory 'low' (meta1) TTL for cache elements"},
 		{"DirLowMax", OT_UINT, {.u=&dir_low_max},
@@ -261,6 +285,13 @@ grid_main_configure(int argc, char **argv)
 	}
 
 	nsname = g_strdup(argv[1]);
+	metautils_strlcpy_physical_ns(nsname, argv[1], strlen(nsname)+1);
+
+	g_static_mutex_init(&nsinfo_mutex);
+	memset(&nsinfo, 0, sizeof(nsinfo));
+	metautils_strlcpy_physical_ns(nsinfo.name, argv[1], sizeof(nsinfo.name));
+	nsinfo.chunk_size = 1;
+
 	dispatcher = transport_http_build_dispatcher(NULL, all_requests);
 	server = network_server_init();
 	resolver = hc_resolver_create();
@@ -281,6 +312,8 @@ grid_main_configure(int argc, char **argv)
 	if (METACD_LB_ENABLED)
 		grid_task_queue_register(admin_gtq, (guint)lb_refresh_delay,
 				(GDestroyNotify)_task_reload_lbpool, NULL, lbpool);
+	grid_task_queue_register(admin_gtq, nsinfo_refresh_delay,
+				(GDestroyNotify)_task_reload_nsinfo, NULL, lbpool);
 	grid_task_queue_fire(admin_gtq);
 
 	network_server_bind_host(server, argv[0],
