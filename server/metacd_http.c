@@ -33,6 +33,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <metautils/lib/metautils.h>
 #include <metautils/lib/metacomm.h>
 #include <cluster/lib/gridcluster.h>
+#include <cluster/remote/gridcluster_remote.h>
 #include <server/network_server.h>
 #include <server/transport_http.h>
 #include <resolver/hc_resolver.h>

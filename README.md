@@ -22,12 +22,14 @@ In the following description, a few ``${...}`` elements are presented. For each 
   * URL Options:
     * ``ns/${NS}``
     * ``type/${TYPE}``
+  * Output: A JSON object with a status, and a key ``srv`` pointing to an array of service\_info objects.
 
 ### Namespace configuration
   * Method: ``GET``
   * URL Prefix: ``/cs/info``
   * URL Options:
     * ``ns/${NS}``
+  * Output: A namespace\_info in its JSON form in the body of the reply.
 
 ### Service listing
   * Method: ``GET``
@@ -35,6 +37,7 @@ In the following description, a few ``${...}`` elements are presented. For each 
   * URL Options:
     * ``ns/${NS}``
     * ``type/${TYPE}``
+  * Output: A JSON object with a status, and a key ``srv`` pointing to an array of service\_info objects.
 
 ### Services flush
   * Method: ``POST``
@@ -42,28 +45,29 @@ In the following description, a few ``${...}`` elements are presented. For each 
   * URL Options:
     * ``ns/${NS}``
     * ``type/${TYPE}``
+  * Output: A JSON object with a status
 
 ### Service unlock
   * Method: ``POST``
   * URL Prefix: ``/cs/unlock``
   * URL Options:
     * ``ns/${NS}``
-    * ``type/${TYPE}``
-    * ``url/${IP}:${PORT}``
+  * Input: A JSON service\_info object.
+  * Output: A JSON object with a status
 
 ### Service lock
   * Method: ``POST``
   * URL Prefix: ``/cs/lock``
   * URL Options:
     * ``ns/${NS}``
-    * ``type/${TYPE}``
-    * ``url/${IP}:${PORT}``
-    * ``score/${SCORE}``
+  * Input: A JSON service\_info object.
+  * Output: A JSON object with a status
 
 ### Service registration
   * Method: ``POST``
   * URL Prefix: ``/cs/reg``
-
+  * Input: A JSON service\_info object.
+  * Output: A JSON object with a status
 
 ## Meta2 operations
 

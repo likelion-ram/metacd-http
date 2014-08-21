@@ -92,7 +92,7 @@ _cs_pack_and_free_srvinfo_list(GSList *svc)
 }
 
 static enum http_rc_e
-action_cs_list (const struct cs_args_s *args)
+action_cs_list (struct cs_args_s *args)
 {
 	GError *err = NULL;
 	GSList *sl = list_namespace_services2(args->ns, args->type, &err);
@@ -105,7 +105,7 @@ action_cs_list (const struct cs_args_s *args)
 }
 
 static enum http_rc_e
-action_cs_info (const struct cs_args_s *args)
+action_cs_info (struct cs_args_s *args)
 {
 	struct namespace_info_s ni;
 	memset(&ni, 0, sizeof(ni));
@@ -120,28 +120,84 @@ action_cs_info (const struct cs_args_s *args)
 }
 
 static enum http_rc_e
-action_cs_reg (const struct cs_args_s *args)
+_registration (const struct cs_args_s *args)
 {
-	(void) args;
-	return HTTPRC_ABORT;
+	GError *err;
+	struct service_info_s *si = NULL;
+
+	g_byte_array_append (args->rq->body, (guint8*)"", 1);
+	const gchar *encoded = (gchar*)args->rq->body->data;
+	err = service_info_load_json(encoded, &si);
+
+	if (err) {
+		if (err->code == 400)
+			return _reply_format_error(args->rp, err);
+		else
+			return _reply_system_error(args->rp, err);
+	}
+
+	if (!validate_namespace(si->ns_name)) {
+		service_info_clean(si);
+		return _reply_soft_error(args->rp, NEWERROR(
+					CODE_NAMESPACE_NOTMANAGED, "Unexpected NS"));
+	}
+
+	if (!args->score) { // Simple registration via the gridagent
+		si->score.value = 0;
+		si->score.timestamp = 0;
+		register_namespace_service(si, &err);
+	} else { // lock or unlock -> direct to the conscience
+		gchar *cs = gridcluster_get_config(args->ns, "conscience", ~0);
+		if (!cs) {
+			err = NEWERROR(CODE_NAMESPACE_NOTMANAGED,
+					"No conscience for namespace NS");
+		} else {
+			struct addr_info_s csaddr;
+			if (!grid_string_to_addrinfo(cs, NULL, &csaddr)) {
+				err = NEWERROR(CODE_NAMESPACE_NOTMANAGED,
+					"Invalid conscience address for NS");
+			} else {
+				si->score.value = atoi(args->score);
+				si->score.timestamp = 0;
+				GSList *l = g_slist_prepend(NULL, si);
+				gcluster_push_services(&csaddr, 4000, l, TRUE, &err);
+				g_slist_free(l);
+				metautils_str_clean(&cs);
+			}
+		}
+	}
+	service_info_clean(si);
+
+	if (err)
+		return _reply_soft_error(args->rp, err);
+	return _reply_success_json(args->rp, NULL);
 }
 
 static enum http_rc_e
-action_cs_lock(const struct cs_args_s *args)
+action_cs_reg (struct cs_args_s *args)
 {
-	(void) args;
-	return HTTPRC_ABORT;
+	if (args->score)
+		metautils_str_clean(&args->score);
+	return _registration(args);
 }
 
 static enum http_rc_e
-action_cs_unlock(const struct cs_args_s *args)
+action_cs_lock(struct cs_args_s *args)
 {
-	(void) args;
-	return HTTPRC_ABORT;
+	if (!args->score)
+		metautils_str_replace(&args->score, "0");
+	return _registration(args);
 }
 
 static enum http_rc_e
-action_cs_clear(const struct cs_args_s *args)
+action_cs_unlock(struct cs_args_s *args)
+{
+	metautils_str_replace(&args->score, "-1");
+	return _registration(args);
+}
+
+static enum http_rc_e
+action_cs_clear(struct cs_args_s *args)
 {
 	GError *err = NULL;
 	gboolean rc = clear_namespace_services(args->ns, args->type, &err);
@@ -156,15 +212,15 @@ static struct cs_action_s
 {
 	const gchar *method;
 	const gchar *prefix;
-	enum http_rc_e (*hook) (const struct cs_args_s *args);
+	enum http_rc_e (*hook) (struct cs_args_s *args);
 	unsigned int expectations;
 } cs_actions[] = {
 	{ "GET",  "list/",   action_cs_list,   TOK_NS|TOK_TYPE },
+	{ "POST", "reg/",    action_cs_reg,    TOK_NS },
+	{ "POST", "unlock/", action_cs_unlock, TOK_NS },
+	{ "POST", "lock/",   action_cs_lock,   TOK_NS },
 	{ "GET",  "info/",   action_cs_info,   TOK_NS },
 	{ "POST", "clear/",  action_cs_clear,  TOK_NS|TOK_TYPE },
-	{ "POST", "unlock/", action_cs_unlock, TOK_NS|TOK_TYPE|TOK_URL },
-	{ "POST", "lock/",   action_cs_lock,   TOK_NS|TOK_TYPE|TOK_URL|TOK_SCORE },
-	{ "POST", "reg/",    action_cs_reg,    TOK_NS|TOK_TYPE|TOK_URL },
 	{ NULL, NULL, NULL, 0 }
 };
 
