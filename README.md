@@ -216,6 +216,7 @@ In the following description, a few ``${...}`` elements are presented. For each 
     * ``ns/${NS}``
     * ``ref/${REF}``
     * ``type/${TYPE}``
+
 ### Container service linking
   * Method: ``POST``
   * URL Prefix: ``/dir/link``
@@ -224,13 +225,12 @@ In the following description, a few ``${...}`` elements are presented. For each 
     * ``ref/${REF}``
     * ``type/${TYPE}``
 
-### Container service unlinking
-  * Method: ``POST``
-  * URL Prefix: ``/dir/unlink``
+### Reference properties handling
+  * Method: ``POST``, ``GET``
+  * URL Prefix: ``/dir/prop``
   * URL Options:
     * ``ns/${NS}``
     * ``ref/${REF}``
-    * ``type/${TYPE}``
 
 ### Simple stats about the directory cache usage
   * Method: ``GET``
