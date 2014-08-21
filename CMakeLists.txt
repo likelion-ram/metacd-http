@@ -180,6 +180,7 @@ target_link_libraries(metacd_http
 		metautils metacomm server hcresolve
 		gridcluster gridcluster-remote
 		meta2v2remote meta2v2utils meta2servicesremote
+		meta1remote
 		${GLIB2_LIBRARIES} ${JSONC_LIBRARIES})
 
 install(TARGETS metacd_http 
