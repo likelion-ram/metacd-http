@@ -177,7 +177,8 @@ link_directories(
 add_executable(metacd_http server/metacd_http.c)
 
 target_link_libraries(metacd_http
-		metautils metacomm gridcluster server hcresolve
+		metautils metacomm server hcresolve
+		gridcluster gridcluster-remote
 		meta2v2remote meta2v2utils meta2servicesremote
 		${GLIB2_LIBRARIES} ${JSONC_LIBRARIES})
 
