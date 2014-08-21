@@ -187,9 +187,46 @@ In the following description, a few ``${...}`` elements are presented. For each 
 
 ## High-level Directory operations
 
+### Reference creation
+  * Method: ``POST``
+  * URL Prefix: ``/dir/link``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``ref/${REF}``
+
+### Reference destruction
+  * Method: ``POST``
+  * URL Prefix: ``/dir/unlink``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``ref/${REF}``
+
 ### Container service listing
   * Method: ``GET``
   * URL Prefix: ``/dir/list``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``ref/${REF}``
+    * ``type/${TYPE}``
+
+### Container service unlinking
+  * Method: ``POST``
+  * URL Prefix: ``/dir/unlink``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``ref/${REF}``
+    * ``type/${TYPE}``
+### Container service linking
+  * Method: ``POST``
+  * URL Prefix: ``/dir/link``
+  * URL Options:
+    * ``ns/${NS}``
+    * ``ref/${REF}``
+    * ``type/${TYPE}``
+
+### Container service unlinking
+  * Method: ``POST``
+  * URL Prefix: ``/dir/unlink``
   * URL Options:
     * ``ns/${NS}``
     * ``ref/${REF}``
