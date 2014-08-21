@@ -37,6 +37,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <server/network_server.h>
 #include <server/transport_http.h>
 #include <resolver/hc_resolver.h>
+#include <meta1v2/meta1_remote.h>
 #include <meta2v2/meta2v2_remote.h>
 #include <meta2v2/meta2_utils.h>
 #include <meta2v2/autogen.h>

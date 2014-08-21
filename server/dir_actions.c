@@ -81,6 +81,14 @@ _pack_m1url_list(gchar **urlv)
 	return gstr;
 }
 
+static GString *
+_pack_and_freev_m1url_list(gchar **urlv)
+{
+	GString *result = _pack_m1url_list(urlv);
+	g_strfreev(urlv);
+	return result;
+}
+
 static enum http_rc_e
 action_dir_list (const struct dir_args_s *args)
 {
@@ -89,22 +97,199 @@ action_dir_list (const struct dir_args_s *args)
 			args->url, args->type, &urlv);
 	if (NULL != err)
 		return _reply_soft_error(args->rp, err);
-	GString *packed = _pack_m1url_list(urlv);
-	g_strfreev(urlv);
-	return _reply_success_json(args->rp, packed);
+	return _reply_success_json(args->rp, _pack_and_freev_m1url_list(urlv));
 }
 
 static enum http_rc_e
 action_dir_link (const struct dir_args_s *args)
 {
-	return _reply_soft_error(args->rp, NEWERROR(501, "Not implemented"));
+	gchar **m1v = NULL;
+	GError *err = hc_resolve_reference_directory (resolver,
+			args->url, &m1v);
+
+	if (NULL != err) {
+		g_prefix_error (&err, "No META1: ");
+		return _reply_soft_error(args->rp, err);
+	}
+
+	for (gchar **pm1=m1v; *pm1 ;++pm1) {
+		struct meta1_service_url_s *m1 = meta1_unpack_url(*pm1);
+		struct addr_info_s m1a;
+		gboolean rc = !m1 ? FALSE : grid_string_to_addrinfo(m1->host, NULL, &m1a);
+
+		if (!rc) {
+			GRID_INFO("Invalid META1 [%s] for [%s]",
+					m1->host, hc_url_get(args->url, HCURL_WHOLE));
+			meta1_service_url_clean(m1);
+			continue;
+		}
+		meta1_service_url_clean(m1);
+
+		gchar **urlv = meta1v2_remote_link_service(&m1a, &err,
+				hc_url_get(args->url, HCURL_NS), hc_url_get_id(args->url),
+				args->type, 30.0, 60.0, NULL);
+		if (!err) {
+			g_strfreev(m1v);
+			return _reply_success_json(args->rp, _pack_and_freev_m1url_list(urlv));
+		}
+		else if (err->code == CODE_REDIRECT) {
+			g_clear_error(&err);
+		}
+		else {
+			g_strfreev(m1v);
+			g_prefix_error(&err, "META1 error: ");
+			return _reply_soft_error(args->rp, err);
+		}
+	}
+
+	g_strfreev(m1v);
+	return _reply_soft_error(args->rp, NEWERROR(CODE_UNAVAILABLE,
+				"No meta1 answered"));
 }
 
 static enum http_rc_e
 action_dir_unlink (const struct dir_args_s *args)
 {
-	return _reply_soft_error(args->rp, NEWERROR(501, "Not implemented"));
+	gchar **m1v = NULL;
+	GError *err = hc_resolve_reference_directory (resolver,
+			args->url, &m1v);
+
+	if (NULL != err) {
+		g_prefix_error (&err, "No META1: ");
+		return _reply_soft_error(args->rp, err);
+	}
+
+	for (gchar **pm1=m1v; *pm1 ;++pm1) {
+		struct meta1_service_url_s *m1 = meta1_unpack_url(*pm1);
+		struct addr_info_s m1a;
+		gboolean rc = !m1 ? FALSE : grid_string_to_addrinfo(m1->host, NULL, &m1a);
+
+		if (!rc) {
+			GRID_INFO("Invalid META1 [%s] for [%s]",
+					m1->host, hc_url_get(args->url, HCURL_WHOLE));
+			meta1_service_url_clean(m1);
+			continue;
+		}
+		meta1_service_url_clean(m1);
+
+		meta1v2_remote_unlink_service(&m1a, &err,
+				hc_url_get(args->url, HCURL_NS), hc_url_get_id(args->url),
+				args->type, 30.0, 60.0, NULL);
+		if (!err) {
+			g_strfreev(m1v);
+			return _reply_success_json(args->rp, NULL);
+		}
+		else if (err->code == CODE_REDIRECT) {
+			g_clear_error(&err);
+		}
+		else {
+			g_strfreev(m1v);
+			g_prefix_error(&err, "META1 error: ");
+			return _reply_soft_error(args->rp, err);
+		}
+	}
+
+	g_strfreev(m1v);
+	return _reply_soft_error(args->rp, NEWERROR(CODE_UNAVAILABLE,
+				"No meta1 answered"));
 }
+
+static enum http_rc_e
+action_dir_create (const struct dir_args_s *args)
+{
+	gchar **m1v = NULL;
+	GError *err = hc_resolve_reference_directory (resolver,
+			args->url, &m1v);
+
+	if (NULL != err) {
+		g_prefix_error (&err, "No META1: ");
+		return _reply_soft_error(args->rp, err);
+	}
+
+	for (gchar **pm1=m1v; *pm1 ;++pm1) {
+		struct meta1_service_url_s *m1 = meta1_unpack_url(*pm1);
+		struct addr_info_s m1a;
+		gboolean rc = !m1 ? FALSE : grid_string_to_addrinfo(m1->host, NULL, &m1a);
+
+		if (!rc) {
+			GRID_INFO("Invalid META1 [%s] for [%s]",
+					m1->host, hc_url_get(args->url, HCURL_WHOLE));
+			meta1_service_url_clean(m1);
+			continue;
+		}
+		meta1_service_url_clean(m1);
+
+		meta1v2_remote_create_reference(&m1a, &err,
+				hc_url_get(args->url, HCURL_NS), hc_url_get_id(args->url),
+				hc_url_get(args->url, HCURL_REFERENCE),
+				30.0, 60.0, NULL);
+		if (!err) {
+			g_strfreev(m1v);
+			return _reply_success_json(args->rp, NULL);
+		}
+		else if (err->code == CODE_REDIRECT) {
+			g_clear_error(&err);
+		}
+		else {
+			g_strfreev(m1v);
+			g_prefix_error(&err, "META1 error: ");
+			return _reply_soft_error(args->rp, err);
+		}
+	}
+
+	g_strfreev(m1v);
+	return _reply_soft_error(args->rp, NEWERROR(CODE_UNAVAILABLE,
+				"No meta1 answered"));
+}
+
+static enum http_rc_e
+action_dir_destroy (const struct dir_args_s *args)
+{
+	gchar **m1v = NULL;
+	GError *err = hc_resolve_reference_directory (resolver,
+			args->url, &m1v);
+
+	if (NULL != err) {
+		g_prefix_error (&err, "No META1: ");
+		return _reply_soft_error(args->rp, err);
+	}
+
+	for (gchar **pm1=m1v; *pm1 ;++pm1) {
+		struct meta1_service_url_s *m1 = meta1_unpack_url(*pm1);
+		struct addr_info_s m1a;
+		gboolean rc = !m1 ? FALSE : grid_string_to_addrinfo(m1->host, NULL, &m1a);
+
+		if (!rc) {
+			GRID_INFO("Invalid META1 [%s] for [%s]",
+					m1->host, hc_url_get(args->url, HCURL_WHOLE));
+			meta1_service_url_clean(m1);
+			continue;
+		}
+		meta1_service_url_clean(m1);
+
+		meta1v2_remote_delete_reference(&m1a, &err,
+				hc_url_get(args->url, HCURL_NS), hc_url_get_id(args->url),
+				30.0, 60.0, NULL);
+		if (!err) {
+			hc_decache_reference_service(resolver, args->url, args->type);
+			g_strfreev(m1v);
+			return _reply_success_json(args->rp, NULL);
+		}
+		else if (err->code == CODE_REDIRECT) {
+			g_clear_error(&err);
+		}
+		else {
+			g_strfreev(m1v);
+			g_prefix_error(&err, "META1 error: ");
+			return _reply_soft_error(args->rp, err);
+		}
+	}
+
+	g_strfreev(m1v);
+	return _reply_soft_error(args->rp, NEWERROR(CODE_UNAVAILABLE,
+				"No meta1 answered"));
+}
+
 
 static enum http_rc_e
 action_dir_flush_low (const struct dir_args_s *args)
@@ -174,10 +359,12 @@ static struct directory_action_s
 	enum http_rc_e (*hook) (const struct dir_args_s *args);
 	unsigned int expectations;
 } dir_actions[] = {
-	{ "GET",  "list/",         action_dir_list,         TOK_NS|TOK_REF},
-	{ "POST", "link/",         action_dir_link,         TOK_NS|TOK_REF},
-	{ "POST", "unlink/",       action_dir_unlink,       TOK_NS|TOK_REF},
-	{ "GET",  "status/",       action_dir_status,       0 },
+	{ "GET",  "list/",    action_dir_list,         TOK_NS|TOK_REF|TOK_TYPE},
+	{ "POST", "link/",    action_dir_link,         TOK_NS|TOK_REF},
+	{ "POST", "unlink/",  action_dir_unlink,       TOK_NS|TOK_REF},
+	{ "POST", "create/",  action_dir_create,       TOK_NS|TOK_REF},
+	{ "POST", "destroy/", action_dir_destroy,      TOK_NS|TOK_REF},
+	{ "GET",  "status/",  action_dir_status,       0 },
 	{ "POST", "flush/high/",   action_dir_flush_high,   0 },
 	{ "POST", "flush/low/",    action_dir_flush_low,    0 },
 	{ "POST", "set/ttl/high/", action_dir_set_ttl_high, 0 },
