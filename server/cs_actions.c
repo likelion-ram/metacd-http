@@ -19,9 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 struct cs_args_s
 {
 	gchar *ns;
-	gchar *url;
 	gchar *type;
-	gchar *score;
 
 	const gchar *uri;
 	struct http_request_s *rq;
@@ -35,8 +33,6 @@ cs_args_clear(struct cs_args_s *args)
 		g_free(args->ns);
 	if (args->type)
 		g_free(args->type);
-	if (args->url)
-		g_free(args->score);
 }
 
 static GError *
@@ -52,19 +48,9 @@ cs_args_extract(const gchar *uri, struct cs_args_s *args)
 		metautils_str_replace(&args->type, *v ? v : NULL);
 		return NULL;
 	}
-	GError* _on_url(const gchar *v) {
-		metautils_str_replace(&args->url, v);
-		return NULL;
-	}
-	GError* _on_score(const gchar *v) {
-		metautils_str_replace(&args->score, v);
-		return NULL;
-	}
 	struct url_action_s actions[] = {
 		{"ns", _on_ns},
-		{"url", _on_url},
 		{"type", _on_type},
-		{"score", _on_score},
 		{NULL, NULL}
 	};
 
@@ -120,7 +106,7 @@ action_cs_info (struct cs_args_s *args)
 }
 
 static enum http_rc_e
-_registration (const struct cs_args_s *args)
+_registration (const struct cs_args_s *args, gboolean direct, gboolean unlock)
 {
 	GError *err;
 	struct service_info_s *si = NULL;
@@ -142,7 +128,7 @@ _registration (const struct cs_args_s *args)
 					CODE_NAMESPACE_NOTMANAGED, "Unexpected NS"));
 	}
 
-	if (!args->score) { // Simple registration via the gridagent
+	if (!direct) { // Simple registration via the gridagent
 		si->score.value = 0;
 		si->score.timestamp = 0;
 		register_namespace_service(si, &err);
@@ -157,7 +143,8 @@ _registration (const struct cs_args_s *args)
 				err = NEWERROR(CODE_NAMESPACE_NOTMANAGED,
 					"Invalid conscience address for NS");
 			} else {
-				si->score.value = atoi(args->score);
+				if (unlock)
+					si->score.value = -1;
 				si->score.timestamp = 0;
 				GSList *l = g_slist_prepend(NULL, si);
 				gcluster_push_services(&csaddr, 4000, l, TRUE, &err);
@@ -166,34 +153,33 @@ _registration (const struct cs_args_s *args)
 			}
 		}
 	}
-	service_info_clean(si);
 
-	if (err)
+	if (err) {
+		service_info_clean(si);
 		return _reply_soft_error(args->rp, err);
-	return _reply_success_json(args->rp, NULL);
+	}
+	GString *gstr = g_string_sized_new (256);
+	service_info_encode_json (gstr, si);
+	service_info_clean (si);
+	return _reply_success_json (args->rp, gstr);
 }
 
 static enum http_rc_e
 action_cs_reg (struct cs_args_s *args)
 {
-	if (args->score)
-		metautils_str_clean(&args->score);
-	return _registration(args);
+	return _registration(args, FALSE, FALSE);
 }
 
 static enum http_rc_e
 action_cs_lock(struct cs_args_s *args)
 {
-	if (!args->score)
-		metautils_str_replace(&args->score, "0");
-	return _registration(args);
+	return _registration(args, TRUE, FALSE);
 }
 
 static enum http_rc_e
 action_cs_unlock(struct cs_args_s *args)
 {
-	metautils_str_replace(&args->score, "-1");
-	return _registration(args);
+	return _registration(args, TRUE, TRUE);
 }
 
 static enum http_rc_e
@@ -229,12 +215,8 @@ action_conscience_real(struct cs_action_s *pa, struct cs_args_s *args)
 {
 	if (!args->ns && pa->expectations & TOK_NS)
 		return _reply_format_error(args->rp, BADREQ("Missing NS"));
-	if (!args->url && pa->expectations & TOK_URL)
-		return _reply_format_error(args->rp, BADREQ("Missing URL"));
 	if (!args->type && pa->expectations & TOK_TYPE)
 		return _reply_format_error(args->rp, BADREQ("Missing TYPE"));
-	if (!args->score && pa->expectations & TOK_SCORE)
-		return _reply_format_error(args->rp, BADREQ("Missing SCORE"));
 	if (!validate_namespace(args->ns))
 		return _reply_soft_error(args->rp, NEWERROR(
 			CODE_NAMESPACE_NOTMANAGED, "Invalid NS"));
