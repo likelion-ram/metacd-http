@@ -187,46 +187,37 @@ In the following description, a few ``${...}`` elements are presented. For each 
 
 ## High-level Directory operations
 
-### Reference creation
-  * Method: ``POST``
-  * URL Prefix: ``/dir/link``
+### Reference management
+  * Method: ``POST`` Creation
+  * Method: ``DELETE`` Destruction
+  * Method: ``GET`` Presence for
+  * URL Prefix: ``/dir/ref``
   * URL Options:
     * ``ns/${NS}``
     * ``ref/${REF}``
 
-### Reference destruction
-  * Method: ``POST``
-  * URL Prefix: ``/dir/unlink``
-  * URL Options:
-    * ``ns/${NS}``
-    * ``ref/${REF}``
-
-### Container service listing
-  * Method: ``GET``
-  * URL Prefix: ``/dir/list``
+### Services listing (DEPRECATED)
+  * Method: ``GET`` List the associated services
+  * Prefix: ``/dir/list``
   * URL Options:
     * ``ns/${NS}``
     * ``ref/${REF}``
     * ``type/${TYPE}``
 
-### Container service unlinking
-  * Method: ``POST``
-  * URL Prefix: ``/dir/unlink``
+### Services management
+  * Method: ``GET`` List the associated services
+  * Method: ``POST`` Ensure a valid service is associated
+  * Method: ``PUT``  Forces a service association
+  * Method: ``DELETE`` Removes an associated service.
+  * URL Prefix: ``/dir/srv``
   * URL Options:
     * ``ns/${NS}``
     * ``ref/${REF}``
     * ``type/${TYPE}``
 
-### Container service linking
-  * Method: ``POST``
-  * URL Prefix: ``/dir/link``
-  * URL Options:
-    * ``ns/${NS}``
-    * ``ref/${REF}``
-    * ``type/${TYPE}``
-
-### Reference properties handling
-  * Method: ``POST``, ``GET``
+### Properties handling
+  * Method: ``POST`` Set a property
+  * Method: ``GET`` List properties.
   * URL Prefix: ``/dir/prop``
   * URL Options:
     * ``ns/${NS}``
@@ -236,12 +227,9 @@ In the following description, a few ``${...}`` elements are presented. For each 
   * Method: ``GET``
   * URL Prefix: ``/dir/status``
 
-### Flush the meta1's cache.
+### Flush the cache sets
   * Method: ``POST``
   * URL Prefix: ``/dir/flush/low``
-
-### Flush the conscience + meta0's cache.
-  * Method: ``POST``
   * URL Prefix: ``/dir/flush/high``
 
 ### Set various limits on internal caches

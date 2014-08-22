@@ -20,11 +20,13 @@ struct dir_args_s
 {
 	struct hc_url_s *url;
 	gchar *type;
+	gchar *renew;
 
 	const gchar *uri;
 	struct http_request_s *rq;
 	struct http_reply_ctx_s *rp;
 };
+
 
 static void
 dir_args_clear (struct dir_args_s *args)
@@ -33,6 +35,8 @@ dir_args_clear (struct dir_args_s *args)
 		hc_url_clean(args->url);
 	if (args->type)
 		g_free(args->type);
+	if (args->renew)
+		g_free(args->renew);
 	memset(args, 0, sizeof(struct dir_args_s));
 }
 
@@ -51,11 +55,16 @@ dir_args_extract(const gchar *uri, struct dir_args_s *args)
 		metautils_str_replace(&args->type, v);
 		return NULL;
 	}
+	GError* _on_renew(const gchar *v) {
+		metautils_str_replace(&args->renew, v);
+		return NULL;
+	}
 
 	struct url_action_s actions[] = {
 		{"ns", _on_ns},
 		{"ref", _on_ref},
 		{"type", _on_type},
+		{"renew", _on_renew},
 		{NULL, NULL}
 	};
 	return _split_and_parse_url(uri, actions);
@@ -70,9 +79,7 @@ _pack_m1url_list(gchar **urlv)
 	g_string_append(gstr, ",\"srv\":[");
 	for (gchar **v=urlv; v && *v ;v++) {
 		struct meta1_service_url_s *m1 = meta1_unpack_url(*v);
-		g_string_append_printf(gstr,
-				"{\"seq\":%"G_GINT64_FORMAT",\"url\":\"%s\",\"args\":\"%s\"}",
-				m1->seq, m1->host, m1->args);
+		meta1_service_url_encode_json(gstr, m1);
 		meta1_service_url_clean(m1);
 		if (*(v+1))
 			g_string_append_c(gstr, ',');
@@ -105,6 +112,7 @@ _pack_and_freev_pairs (gchar **pairs)
 	g_strfreev(pairs);
 	return out;
 }
+
 
 static GError*
 _m1_action (const struct dir_args_s *args, gchar **m1v, GError* (*hook) (const gchar *m1))
@@ -151,6 +159,62 @@ _m1_locate_and_action (const struct dir_args_s *args, GError* (*hook) ())
 	return err;
 }
 
+static GError *
+decode_json_m1url (struct meta1_service_url_s **out, void *b, gsize blen)
+{
+	struct json_tokener *parser = json_tokener_new ();
+	struct json_object *jbody = json_tokener_parse_ex(parser, (char*) b, blen);
+	GError *err = meta1_service_url_load_json_object(jbody, out);
+	json_object_put (jbody);
+	json_tokener_free (parser);
+	return err;
+}
+
+static GError *
+decode_json_string_array (const gchar *k, gchar ***pkeys, void *b, gsize blen)
+{
+	struct json_tokener *parser;
+	struct json_object *jbody;
+	gchar **keys = NULL;
+	GError *err = NULL;
+
+	// Parse the keys
+	parser = json_tokener_new ();
+	jbody = json_tokener_parse_ex(parser, (char*) b, blen);
+	if (!json_object_is_type(jbody, json_type_object)) {
+		err = BADREQ("Invalid/Unexpected JSON");
+	} else {
+		struct json_object *jkeys;
+		if (!json_object_object_get_ex(jbody, k, &jkeys)
+				|| !json_object_is_type(jkeys, json_type_array)) {
+			err = BADREQ("No/Invalid '%s' section", k);
+		} else {
+			GPtrArray *v = g_ptr_array_new();
+			guint count = 0;
+			for (gint i=json_object_array_length(jkeys); i>0 ;--i) {
+				++ count;
+				struct json_object *item = json_object_array_get_idx(jkeys, i-1);
+				if (!json_object_is_type(item, json_type_string)) {
+					err = BADREQ("Invalid key at body['%s'][%u]", k, count);
+					break;
+				}
+				g_ptr_array_add(v, g_strdup(json_object_get_string(item)));
+			}
+			if (!err) {
+				g_ptr_array_add(v, NULL);
+				keys = (gchar**) g_ptr_array_free(v, FALSE);
+			} else {
+				g_ptr_array_free(v, TRUE);
+			}
+		}
+	}
+	json_object_put (jbody);
+	json_tokener_free (parser);
+
+	*pkeys = keys;
+	return err;
+}
+
 
 static enum http_rc_e
 action_dir_list (const struct dir_args_s *args)
@@ -158,6 +222,7 @@ action_dir_list (const struct dir_args_s *args)
 	gchar **urlv = NULL;
 	GError *err = hc_resolve_reference_service (resolver,
 			args->url, args->type, &urlv);
+	g_assert((err!=NULL) ^ (urlv!=NULL));
 	if (NULL != err)
 		return _reply_soft_error(args->rp, err);
 	return _reply_success_json(args->rp, _pack_and_freev_m1url_list(urlv));
@@ -172,9 +237,15 @@ action_dir_link (const struct dir_args_s *args)
 		if (!grid_string_to_addrinfo(m1, NULL, &m1a))
 			return NEWERROR(CODE_NETWORK_ERROR, "Invalid M1 address");
 		GError *err = NULL;
-		urlv = meta1v2_remote_link_service(&m1a, &err,
-				hc_url_get(args->url, HCURL_NS), hc_url_get_id(args->url),
-				args->type, 30.0, 60.0, NULL);
+		if (metautils_cfg_get_bool(args->renew, FALSE)) {
+			urlv = meta1v2_remote_poll_reference_service(&m1a, &err,
+					hc_url_get(args->url, HCURL_NS), hc_url_get_id(args->url),
+					args->type, 30.0, 60.0, NULL);
+		} else {
+			urlv = meta1v2_remote_link_service(&m1a, &err,
+					hc_url_get(args->url, HCURL_NS), hc_url_get_id(args->url),
+					args->type, 30.0, 60.0, NULL);
+		}
 		return err;
 	}
 
@@ -183,6 +254,37 @@ action_dir_link (const struct dir_args_s *args)
 		return _reply_soft_error(args->rp, err);
 	g_assert(urlv != NULL);
 	return _reply_success_json(args->rp, _pack_and_freev_m1url_list(urlv));
+}
+
+static enum http_rc_e
+action_dir_force (const struct dir_args_s *args)
+{
+	GError *err = NULL;
+	gchar *url = NULL;
+
+	GError* hook (const gchar *m1) {
+		struct addr_info_s m1a;
+		if (!grid_string_to_addrinfo(m1, NULL, &m1a))
+			return NEWERROR(CODE_NETWORK_ERROR, "Invalid M1 address");
+		GError *e = NULL;
+		meta1v2_remote_force_reference_service(&m1a, &e,
+				hc_url_get(args->url, HCURL_NS), hc_url_get_id(args->url),
+				"", 30.0, 60.0, NULL);
+		return e;
+	}
+
+	struct meta1_service_url_s *m1u = NULL;
+	err = decode_json_m1url(&m1u, args->rq->body->data, args->rq->body->len);
+	if (!err) {
+		url = meta1_pack_url(m1u);
+		meta1_service_url_clean(m1u);
+		err = _m1_locate_and_action(args, hook);
+		g_free(url);
+		url = NULL;
+	}
+	if (err)
+		return _reply_soft_error(args->rp, err);
+	return _reply_success_json(args->rp, NULL);
 }
 
 static enum http_rc_e
@@ -199,6 +301,25 @@ action_dir_unlink (const struct dir_args_s *args)
 		return err;
 	}
 
+	GError *err = _m1_locate_and_action(args, hook);
+	if (!err)
+		return _reply_success_json(args->rp, NULL);
+	return _reply_soft_error(args->rp, err);
+}
+
+static enum http_rc_e
+action_dir_has (const struct dir_args_s *args)
+{
+	GError* hook (const gchar *m1) {
+		struct addr_info_s m1a;
+		if (!grid_string_to_addrinfo(m1, NULL, &m1a))
+			return NEWERROR(CODE_NETWORK_ERROR, "Invalid M1 address");
+		GError *err = NULL;
+		meta1v2_remote_has_reference(&m1a, &err,
+				hc_url_get(args->url, HCURL_NS), hc_url_get_id(args->url),
+				30.0, 60.0);
+		return err;
+	}
 	GError *err = _m1_locate_and_action(args, hook);
 	if (!err)
 		return _reply_success_json(args->rp, NULL);
@@ -247,44 +368,9 @@ action_dir_destroy (const struct dir_args_s *args)
 static enum http_rc_e
 action_dir_propget (const struct dir_args_s *args)
 {
-	struct json_tokener *parser;
-	struct json_object *jbody;
-	gchar **keys = NULL;
-	GError *err = NULL;
-
-	// Parse the keys
-	parser = json_tokener_new ();
-	jbody = json_tokener_parse_ex(parser, (char*) args->rq->body->data,
-			args->rq->body->len);
-	if (!json_object_is_type(jbody, json_type_object)) {
-		err = BADREQ("Invalid/Unexpected JSON");
-	} else {
-		struct json_object *jkeys;
-		if (!json_object_object_get_ex(jbody, "keys", &jkeys)
-				|| !json_object_is_type(jkeys, json_type_array)) {
-			err = BADREQ("No/Invalid 'keys' section");
-		} else {
-			GPtrArray *v = g_ptr_array_new();
-			guint count = 0;
-			for (gint i=json_object_array_length(jkeys); i>0 ;--i) {
-				++ count;
-				struct json_object *item = json_object_array_get_idx(jkeys, i-1);
-				if (!json_object_is_type(item, json_type_string)) {
-					err = BADREQ("Invalid key at body['keys'][%u]", count);
-					break;
-				}
-				g_ptr_array_add(v, g_strdup(json_object_get_string(item)));
-			}
-			if (!err) {
-				g_ptr_array_add(v, NULL);
-				keys = (gchar**) g_ptr_array_free(v, FALSE);
-			} else {
-				g_ptr_array_free(v, TRUE);
-			}
-		}
-	}
-	json_object_put (jbody);
-	json_tokener_free (parser);
+	gchar ** keys = NULL;
+	GError *err = decode_json_string_array ("keys", &keys,
+			args->rq->body->data, args->rq->body->len);
 
 	// Execute the request
 	gchar **pairs = NULL;
@@ -370,6 +456,35 @@ action_dir_propset (const struct dir_args_s *args)
 	return _reply_soft_error(args->rp, err);
 }
 
+static enum http_rc_e
+action_dir_propdel (const struct dir_args_s *args)
+{
+	gchar ** keys = NULL;
+	GError *err = decode_json_string_array ("keys", &keys,
+			args->rq->body->data, args->rq->body->len);
+
+	// Execute the request
+	GError* hook (const gchar *m1) {
+		struct addr_info_s m1a;
+		if (!grid_string_to_addrinfo(m1, NULL, &m1a))
+			return NEWERROR(CODE_NETWORK_ERROR, "Invalid M1 address");
+		GError *e = NULL;
+		meta1v2_remote_reference_del_property(&m1a, &e,
+				hc_url_get(args->url, HCURL_NS), hc_url_get_id(args->url),
+				keys, 30.0, 60.0, NULL);
+		return e;
+	}
+
+	if (!err) {
+		err = _m1_locate_and_action(args, hook);
+		g_strfreev(keys);
+		keys = NULL;
+	}
+	if (!err)
+		return _reply_success_json(args->rp, NULL);
+	return _reply_soft_error(args->rp, err);
+}
+
 
 static enum http_rc_e
 action_dir_flush_low (const struct dir_args_s *args)
@@ -439,20 +554,31 @@ static struct directory_action_s
 	enum http_rc_e (*hook) (const struct dir_args_s *args);
 	unsigned int expectations;
 } dir_actions[] = {
-	{ "GET",  "list/",    action_dir_list,         TOK_NS|TOK_REF|TOK_TYPE},
-	{ "POST", "link/",    action_dir_link,         TOK_NS|TOK_REF},
-	{ "POST", "unlink/",  action_dir_unlink,       TOK_NS|TOK_REF},
-	{ "POST", "create/",  action_dir_create,       TOK_NS|TOK_REF},
-	{ "POST", "destroy/", action_dir_destroy,      TOK_NS|TOK_REF},
-	{ "GET",  "prop/",    action_dir_propget,      TOK_NS|TOK_REF },
-	{ "POST", "prop/",    action_dir_propset,      TOK_NS|TOK_REF },
-	{ "GET",  "status/",  action_dir_status,       0 },
-	{ "POST", "flush/high/",   action_dir_flush_high,   0 },
-	{ "POST", "flush/low/",    action_dir_flush_low,    0 },
-	{ "POST", "set/ttl/high/", action_dir_set_ttl_high, 0 },
-	{ "POST", "set/ttl/low/",  action_dir_set_ttl_low,  0 },
-	{ "POST", "set/max/high/", action_dir_set_max_high, 0 },
-	{ "POST", "set/max/low/",  action_dir_set_max_low,  0 },
+
+	// old patterns maintained because publicly exposed and used.
+	{ "GET", "list/", action_dir_list,     TOK_NS|TOK_REF|TOK_TYPE},
+
+	// new patterns
+	{ "GET",    "ref/", action_dir_has,     TOK_NS|TOK_REF},
+	{ "POST",   "ref/", action_dir_create,  TOK_NS|TOK_REF},
+	{ "DELETE", "ref/", action_dir_destroy, TOK_NS|TOK_REF},
+
+	{ "GET",    "prop/", action_dir_propget, TOK_NS|TOK_REF },
+	{ "POST",   "prop/", action_dir_propset, TOK_NS|TOK_REF },
+	{ "DELETE", "prop/", action_dir_propdel, TOK_NS|TOK_REF },
+
+	{ "GET",      "srv/", action_dir_list,   TOK_NS|TOK_REF|TOK_TYPE},
+	{ "POST",     "srv/", action_dir_link,   TOK_NS|TOK_REF},
+	{ "DELETE",   "srv/", action_dir_unlink, TOK_NS|TOK_REF},
+	{ "PUT",      "srv/", action_dir_force,  TOK_NS|TOK_REF},
+
+	{ "GET",    "status/",       action_dir_status,       0 },
+	{ "POST",   "flush/high/",   action_dir_flush_high,   0 },
+	{ "POST",   "flush/low/",    action_dir_flush_low,    0 },
+	{ "POST",   "set/ttl/high/", action_dir_set_ttl_high, 0 },
+	{ "POST",   "set/ttl/low/",  action_dir_set_ttl_low,  0 },
+	{ "POST",   "set/max/high/", action_dir_set_max_high, 0 },
+	{ "POST",   "set/max/low/",  action_dir_set_max_low,  0 },
 
 	{ NULL, NULL, NULL, 0 }
 };
@@ -486,8 +612,8 @@ action_directory(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 			continue;
 
 		struct dir_args_s args;
+		memset(&args, 0, sizeof(args));
 		args.url = hc_url_empty();
-		args.type = NULL;
 		args.uri = uri + strlen(pa->prefix);
 		args.rq = rq;
 		args.rp = rp;
