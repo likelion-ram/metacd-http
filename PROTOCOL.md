@@ -18,6 +18,7 @@ In the following description, a few ``${...}`` elements are presented. For each 
   * URL ``/cs/info``
     * ``ns/${NS}``
   * **GET** Gets a namespace\_info in its JSON form in the body of the reply.
+  * **HEAD** Check the namespace is known
 
 ### Services management
   * URL ``/cs/srv`` : play on collection on services. What identifies a collection is the NS it belongs to and its type name.
@@ -26,6 +27,7 @@ In the following description, a few ``${...}`` elements are presented. For each 
   * **PUT** registers a list of services in the given collection
     * input : a JSON encoded array of services. The given score will be ignored.
   * **GET** get the list of services in the collection.
+  * **HEAD** Check the service type is known for this namespace
   * **DELETE** flush a service definition or a single service
   * **POST**
     * ``action/lock`` force the score of the service described in the body [to the value in the description].

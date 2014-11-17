@@ -100,6 +100,13 @@ _registration (const struct req_args_s *args, gboolean direct, gboolean unlock)
 //------------------------------------------------------------------------------
 
 static enum http_rc_e
+action_cs_nscheck (const struct req_args_s *args)
+{
+	// The namespace has already been checked
+	return _reply_success_json (args->rp, NULL);
+}
+
+static enum http_rc_e
 action_cs_info (const struct req_args_s *args)
 {
 	struct namespace_info_s ni;
@@ -134,6 +141,13 @@ action_cs_get (const struct req_args_s *args)
 }
 
 static enum http_rc_e
+action_cs_srvcheck (const struct req_args_s *args)
+{
+	// The namespace and servcie have already been checked
+	return _reply_success_json (args->rp, NULL);
+}
+
+static enum http_rc_e
 action_cs_del (const struct req_args_s *args)
 {
 	GError *err = NULL;
@@ -161,11 +175,13 @@ action_conscience (struct http_request_s *rq, struct http_reply_ctx_s *rp,
 {
 	static struct req_action_s cs_actions[] = {
 		{"GET", "info/", action_cs_info, TOK_NS},
+		{"HEAD", "info/", action_cs_nscheck, TOK_NS},
 
 		{"PUT", "srv/", action_cs_put, TOK_NS | TOK_TYPE},
 		{"GET", "srv/", action_cs_get, TOK_NS | TOK_TYPE},
-		{"DELETE", "srv/", action_cs_del, TOK_NS | TOK_TYPE},
+		{"HEAD", "srv/", action_cs_srvcheck, TOK_NS | TOK_TYPE},
 		{"POST", "srv/", action_cs_post, TOK_NS | TOK_TYPE | TOK_ACTION},
+		{"DELETE", "srv/", action_cs_del, TOK_NS | TOK_TYPE},
 		/// lock, unlock
 		{NULL, NULL, NULL, 0}
 	};
