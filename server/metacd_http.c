@@ -36,6 +36,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <cluster/remote/gridcluster_remote.h>
 #include <server/network_server.h>
 #include <server/transport_http.h>
+#include <server/stats_holder.h>
 #include <resolver/hc_resolver.h>
 #include <meta1v2/meta1_remote.h>
 #include <meta2v2/meta2v2_remote.h>
@@ -100,21 +101,59 @@ static gboolean validate_srvtype (const gchar * n);
 
 // Misc. handlers --------------------------------------------------------------
 
+static enum http_rc_e
+action_status(struct http_request_s *rq, struct http_reply_ctx_s *rp,
+		const gchar *uri)
+{
+	(void) uri;
+
+	if (0 == strcasecmp("HEAD", rq->cmd))
+		return _reply_success_json(rp, NULL);
+	if (0 != strcasecmp("GET", rq->cmd))
+		return _reply_method_error(rp);
+
+	GString *gstr = g_string_sized_new (128);
+	gboolean runner (const gchar *n, guint64 v) {
+		g_string_append_printf(gstr, "%s = %"G_GINT64_FORMAT"\n", n, v);
+		return TRUE;
+	}
+	grid_stats_holder_foreach(rq->client->main_stats, NULL, runner);
+
+	struct hc_resolver_stats_s s;
+	memset(&s, 0, sizeof(s));
+	hc_resolver_info(resolver, &s);
+
+	g_string_append_printf(gstr, "cache.dir.count = %"G_GINT64_FORMAT"\n", s.csm0.count);
+	g_string_append_printf(gstr, "cache.dir.max = %u\n", s.csm0.max);
+	g_string_append_printf(gstr, "cache.dir.ttl = %lu\n", s.csm0.ttl);
+	g_string_append_printf(gstr, "cache.dir.clock = %lu\n", s.clock);
+
+	g_string_append_printf(gstr, "cache.srv.count = %"G_GINT64_FORMAT"\n", s.services.count);
+	g_string_append_printf(gstr, "cache.srv.max = %u\n", s.services.max);
+	g_string_append_printf(gstr, "cache.srv.ttl = %lu\n", s.services.ttl);
+	g_string_append_printf(gstr, "cache.srv.clock = %lu\n", s.clock);
+
+	rp->set_body_gstr(gstr);
+	rp->set_status(200, "OK");
+	rp->set_content_type("text/x-java-properties");
+	rp->finalize();
+	return HTTPRC_DONE;
+}
+
 struct action_s {
 	const gchar *prefix;
 	enum http_rc_e (*hook) (struct http_request_s * rq,
 		struct http_reply_ctx_s * rp, const gchar * uri);
 } actions[] = {
 	// Legacy request handlers
-	{
-	"lb/sl/", action_loadbalancing},
-		// New request handlers
-	{
-	"m2/", action_meta2}, {
-	"cs/", action_conscience}, {
-	"dir/", action_directory}, {
-	"cache/", action_cache}, {
-	NULL, NULL}
+	{"lb/sl/", action_loadbalancing},
+	// New request handlers
+	{"m2/", action_meta2},
+	{"cs/", action_conscience},
+	{"dir/", action_directory},
+	{"cache/", action_cache},
+	{"status", action_status},
+	{NULL, NULL}
 };
 
 static enum http_rc_e
