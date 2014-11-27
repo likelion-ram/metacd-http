@@ -63,6 +63,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define RESOLVD_DEFAULT_MAX_CSM0 0
 #endif
 
+#define XTRACE() GRID_TRACE2("%s (%s)", __FUNCTION__, hc_url_get(args->url, HCURL_WHOLE))
+
 static struct http_request_dispatcher_s *dispatcher = NULL;
 static struct network_server_s *server = NULL;
 

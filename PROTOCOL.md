@@ -58,7 +58,7 @@ In the following description, a few ``${...}`` elements are presented. For each 
     * ``action/link`` 
     * ``action/renew`` 
     * ``action/force`` 
-    * input body : JSON encoded service description
+	  * input body : JSON encoded service description
 
 ### Properties handling
   * URL ``/dir/prop``

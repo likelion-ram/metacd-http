@@ -19,13 +19,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 enum {
 	TOK_NS = 0x0001,
 	TOK_REF = 0x0002,
-	TOK_CID = 0x0100,
 	TOK_PATH = 0x0004,
 	TOK_TYPE = 0x0008,
-	TOK_ACTION = 0x0020,
-	TOK_STGPOL = 0x0040,
-	TOK_VERPOL = 0x0080,
-	TOK_VERSION = 0x0200,
+	TOK_ACTION = 0x0010,
+	TOK_STGPOL = 0x0020,
+	TOK_VERPOL = 0x0040,
+	TOK_VERSION = 0x0080,
 };
 
 enum {
@@ -44,7 +43,6 @@ struct req_args_s {
 	gchar *version;
 	gchar *stgpol;
 	gchar *verpol;
-	gchar *strcid;
 
 	guint32 flags;
 
@@ -143,7 +141,6 @@ req_args_extract_tokens (const gchar * uri, struct req_args_s *args)
 	struct url_action_s actions[] = {
 		{"ns", &args->ns},
 		{"ref", &args->ref},
-		{"cid", &args->strcid},
 		{"path", &args->path},
 		{"type", &args->type},
 		{"action", &args->action},
@@ -154,31 +151,6 @@ req_args_extract_tokens (const gchar * uri, struct req_args_s *args)
 		{NULL, NULL}
 	};
 	return _split_and_parse_url (uri, actions);
-}
-
-static void
-req_args_fill_url (struct req_args_s *args, struct hc_url_s *u)
-{
-	if (args->ns) {
-		gchar pns[LIMIT_LENGTH_NSNAME + 1];
-		metautils_strlcpy_physical_ns (pns, args->ns, sizeof (pns));
-		hc_url_set (u, HCURL_NSPHYS, pns);
-	}
-	if (args->ref)
-		hc_url_set (u, HCURL_REFERENCE, args->ref);
-	if (args->path)
-		hc_url_set (u, HCURL_PATH, args->path);
-	if (args->strcid)
-		hc_url_set (u, HCURL_HEXID, args->strcid);
-
-#if 0
-	GRID_INFO ("NS:%s ref:%s path:%s action:%s "
-		"size:%s type:%s version:%s stgpol:%s verpol:%s "
-		"cid:%s URL:%s",
-		args->ns, args->ref, args->path, args->action,
-		args->size, args->type, args->version, args->stgpol,
-		args->verpol, args->strcid, hc_url_get (args->url, HCURL_WHOLE));
-#endif
 }
 
 static gboolean
@@ -211,17 +183,23 @@ req_args_extract (struct http_request_s *rq, struct http_reply_ctx_s *rp,
 static GError *
 req_args_check (struct req_args_s *args, guint32 flags)
 {
+	if (args->ns)
+		hc_url_set (args->url, HCURL_NS, args->ns);
+	if (args->ref)
+		hc_url_set (args->url, HCURL_REFERENCE, args->ref);
+	if (args->path)
+		hc_url_set (args->url, HCURL_PATH, args->path);
+
 	PRESENCE (NS, ns);
-	PRESENCE (TYPE, type);
 	PRESENCE (REF, ref);
+	PRESENCE (TYPE, type);
 	PRESENCE (PATH, path);
 	PRESENCE (STGPOL, stgpol);
 	PRESENCE (VERPOL, verpol);
-	PRESENCE (CID, strcid);
 
 	// All the fields are present ... now check their value
 	if (flags & TOK_NS || args->ns) {
-		if (!validate_namespace (args->ns))
+		if (!validate_namespace (hc_url_get(args->url, HCURL_NSPHYS)))
 			return NEWERROR (CODE_NAMESPACE_NOTMANAGED, "Invalid NS");
 	}
 	if (flags & TOK_TYPE) {
@@ -243,19 +221,25 @@ req_args_call (struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		if (0 != strcmp (rq->cmd, pa->method))
 			continue;
 
+		GRID_TRACE2("%s|%s matched %s|%s -> %p",
+				rq->cmd, rq->req_uri, pa->method, pa->prefix, pa->hook);
 		struct req_args_s args;
 		enum http_rc_e e;
 		GError *err;
 		if (NULL != (err = req_args_extract (rq, rp, uri, pa->prefix, &args)))
 			e = _reply_format_error (rp, err);
-		else if (NULL != (err = req_args_check (&args, pa->mandatory))) {
-			if (err->code == CODE_NAMESPACE_NOTMANAGED || err->code == 404)
-				e = _reply_notfound_error (rp, err);
-			else
-				e = _reply_format_error (rp, err);
-		} else {
-			req_args_fill_url (&args, args.url);
-			e = pa->hook (&args);
+
+		else {
+			GRID_TRACE2("REQ ns:%s ref:%s path:%s",
+					args.ns, args.ref, args.path);
+			if (NULL != (err = req_args_check (&args, pa->mandatory))) {
+				if (err->code == CODE_NAMESPACE_NOTMANAGED || err->code == 404)
+					e = _reply_notfound_error (rp, err);
+				else
+					e = _reply_format_error (rp, err);
+			} else {
+				e = pa->hook (&args);
+			}
 		}
 		req_args_clear (&args);
 		return e;
