@@ -83,7 +83,10 @@ _resolve_m2_and_do (struct hc_resolver_s *r, struct hc_url_s *u,
 	gchar **m2v = NULL;
 	GError *err;
 
-	if (NULL != (err = hc_resolve_reference_service (r, u, "meta2", &m2v))) {
+	err = hc_resolve_reference_service (r, u, "meta2", &m2v);
+	g_assert(BOOL(m2v!=NULL) ^ BOOL(err!=NULL));
+
+	if (NULL != err) {
 		g_prefix_error (&err, "Resolution error: ");
 		return err;
 	}
@@ -91,8 +94,8 @@ _resolve_m2_and_do (struct hc_resolver_s *r, struct hc_url_s *u,
 	if (!*m2v)
 		err = NEWERROR (CODE_CONTAINER_NOTFOUND, "No meta2 located");
 	else {
-		for (; m2v && *m2v; ++m2v) {
-			struct meta1_service_url_s *m2 = meta1_unpack_url (*m2v);
+		for (gchar **pm2 = m2v; *pm2; ++pm2) {
+			struct meta1_service_url_s *m2 = meta1_unpack_url (*pm2);
 			err = hook (m2);
 			meta1_service_url_clean (m2);
 
@@ -589,31 +592,38 @@ action_m2_get (const struct req_args_s *args)
 
 static enum http_rc_e
 action_meta2 (struct http_request_s *rq, struct http_reply_ctx_s *rp,
-	const gchar * uri)
+	struct req_uri_s *uri, const gchar *path)
 {
 	static struct req_action_s m2_actions[] = {
 		// Legacy
-		{"GET", "get/", action_m2_get, TOK_NS | TOK_REF | TOK_PATH},
+		{"GET", "get/", action_m2_get,
+			TOK_NS | TOK_REF | TOK_PATH, 0, TOK_VERSION},
 
-		{"PUT", "container/", action_m2_container_create, TOK_NS | TOK_REF},
-		{"GET", "container/", action_m2_container_list, TOK_NS | TOK_REF},
-		{"HEAD", "container/", action_m2_container_check, TOK_NS | TOK_REF},
-		{"DELETE", "container/", action_m2_container_destroy, TOK_NS | TOK_REF},
+		{"PUT", "container/", action_m2_container_create,
+			TOK_NS | TOK_REF, 0, 0},
+		{"GET", "container/", action_m2_container_list,
+			TOK_NS | TOK_REF, 0, 0},
+		{"HEAD", "container/", action_m2_container_check,
+			TOK_NS | TOK_REF, 0, 0},
+		{"DELETE", "container/", action_m2_container_destroy,
+			TOK_NS | TOK_REF, 0, 0},
 		{"POST", "container/", action_m2_container_action,
-			TOK_NS | TOK_REF | TOK_ACTION},
+			TOK_NS | TOK_REF, TOK_ACTION, TOK_STGPOL},
 		// purge, dedup, touch, stgpol
 
-		{"PUT", "content/", action_m2_content_put, TOK_NS | TOK_REF | TOK_PATH},
-		{"GET", "content/", action_m2_content_get, TOK_NS | TOK_REF | TOK_PATH},
+		{"PUT", "content/", action_m2_content_put,
+			TOK_NS | TOK_REF | TOK_PATH, 0, 0},
+		{"GET", "content/", action_m2_content_get,
+			TOK_NS | TOK_REF | TOK_PATH, 0, TOK_VERSION},
 		{"HEAD", "content/", action_m2_content_check,
-			TOK_NS | TOK_REF | TOK_PATH},
+			TOK_NS | TOK_REF | TOK_PATH, 0, TOK_VERSION},
 		{"DELETE", "content/", action_m2_content_delete,
-			TOK_NS | TOK_REF | TOK_PATH},
+			TOK_NS | TOK_REF | TOK_PATH, 0, TOK_VERSION},
 		{"POST", "content/", action_m2_content_action,
-			TOK_NS | TOK_REF | TOK_PATH | TOK_ACTION},
+			TOK_NS | TOK_REF | TOK_PATH, TOK_ACTION, TOK_STGPOL | TOK_SIZE},
 		// beans, copy, touch, stgpol, append, spare, overwrite
 
-		{NULL, NULL, NULL, 0}
+		{NULL, NULL, NULL, 0, 0, 0}
 	};
-	return req_args_call (rq, rp, uri, m2_actions);
+	return req_args_call (rq, rp, uri, path, m2_actions);
 }

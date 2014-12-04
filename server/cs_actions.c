@@ -38,8 +38,14 @@ _cs_pack_and_free_srvinfo_list (GSList * svc)
 	return gstr;
 }
 
+enum reg_op_e {
+	REGOP_PUSH,
+	REGOP_LOCK,
+	REGOP_UNLOCK,
+};
+
 static enum http_rc_e
-_registration (const struct req_args_s *args, gboolean direct, gboolean unlock)
+_registration (const struct req_args_s *args, enum reg_op_e op)
 {
 	GError *err;
 	struct service_info_s *si = NULL;
@@ -61,39 +67,19 @@ _registration (const struct req_args_s *args, gboolean direct, gboolean unlock)
 				"Unexpected NS"));
 	}
 
-	if (!direct) {				// Simple registration via the gridagent
+	si->score.timestamp = network_server_bogonow(args->rq->client->server);
+	if (op == REGOP_PUSH)
 		si->score.value = 0;
-		si->score.timestamp = 0;
-		register_namespace_service (si, &err);
-	} else {					// lock or unlock -> direct to the conscience
-		gchar *cs = gridcluster_get_config (args->ns, "conscience", ~0);
-		if (!cs) {
-			err = NEWERROR (CODE_NAMESPACE_NOTMANAGED,
-				"No conscience for namespace NS");
-		} else {
-			struct addr_info_s csaddr;
-			if (!grid_string_to_addrinfo (cs, NULL, &csaddr)) {
-				err = NEWERROR (CODE_NAMESPACE_NOTMANAGED,
-					"Invalid conscience address for NS");
-			} else {
-				if (unlock)
-					si->score.value = -1;
-				si->score.timestamp = 0;
-				GSList *l = g_slist_prepend (NULL, si);
-				gcluster_push_services (&csaddr, 4000, l, TRUE, &err);
-				g_slist_free (l);
-				metautils_str_clean (&cs);
-			}
-		}
-	}
+	else if (op == REGOP_UNLOCK)
+		si->score.value = -1;
 
-	if (err) {
-		service_info_clean (si);
+	gchar *key = service_info_key(si);
+	PUSH_DO(lru_tree_insert(push_queue, key, si));
+
+	if (err)
 		return _reply_soft_error (args->rp, err);
-	}
 	GString *gstr = g_string_sized_new (256);
 	service_info_encode_json (gstr, si);
-	service_info_clean (si);
 	return _reply_success_json (args->rp, gstr);
 }
 
@@ -111,9 +97,7 @@ action_cs_info (const struct req_args_s *args)
 {
 	struct namespace_info_s ni;
 	memset (&ni, 0, sizeof (ni));
-	g_static_mutex_lock (&nsinfo_mutex);
-	namespace_info_copy (&nsinfo, &ni, NULL);
-	g_static_mutex_unlock (&nsinfo_mutex);
+	NSINFO_DO(namespace_info_copy (&nsinfo, &ni, NULL));
 
 	GString *gstr = g_string_sized_new (1024);
 	namespace_info_encode_json (gstr, &ni);
@@ -124,7 +108,7 @@ action_cs_info (const struct req_args_s *args)
 static enum http_rc_e
 action_cs_put (const struct req_args_s *args)
 {
-	return _registration (args, FALSE, FALSE);
+	return _registration (args, REGOP_PUSH);
 }
 
 static enum http_rc_e
@@ -163,27 +147,49 @@ static enum http_rc_e
 action_cs_post (const struct req_args_s *args)
 {
 	if (0 == strcmp (args->action, "lock"))
-		return _registration (args, TRUE, FALSE);
+		return _registration (args, REGOP_LOCK);
 	if (0 == strcmp (args->action, "unlock"))
-		return _registration (args, TRUE, TRUE);
+		return _registration (args, REGOP_UNLOCK);
 	return _reply_format_error (args->rp, BADREQ ("Invalid action"));
 }
 
 static enum http_rc_e
+action_cs_srvtypes (const struct req_args_s *args)
+{
+	GString *out = g_string_sized_new(128);
+	g_string_append_c(out, '[');
+	NSINFO_DO(if (srvtypes && *srvtypes) {
+		g_string_append_c(out, '"');
+		g_string_append(out, *srvtypes);
+		g_string_append_c(out, '"');
+		for (gchar **ps = srvtypes+1; *ps ;ps++) {
+			g_string_append_c(out, ',');
+			g_string_append_c(out, '"');
+			g_string_append(out, *ps);
+			g_string_append_c(out, '"');
+		}
+	});
+	g_string_append_c(out, ']');
+	return _reply_success_json (args->rp, out);
+}
+
+static enum http_rc_e
 action_conscience (struct http_request_s *rq, struct http_reply_ctx_s *rp,
-	const gchar * uri)
+	struct req_uri_s *uri, const gchar *path)
 {
 	static struct req_action_s cs_actions[] = {
-		{"GET", "info/", action_cs_info, TOK_NS},
-		{"HEAD", "info/", action_cs_nscheck, TOK_NS},
+		{"GET", "info/", action_cs_info, TOK_NS, 0, 0},
+		{"HEAD", "info/", action_cs_nscheck, TOK_NS, 0, 0},
 
-		{"PUT", "srv/", action_cs_put, TOK_NS | TOK_TYPE},
-		{"GET", "srv/", action_cs_get, TOK_NS | TOK_TYPE},
-		{"HEAD", "srv/", action_cs_srvcheck, TOK_NS | TOK_TYPE},
-		{"POST", "srv/", action_cs_post, TOK_NS | TOK_TYPE | TOK_ACTION},
-		{"DELETE", "srv/", action_cs_del, TOK_NS | TOK_TYPE},
+		{"GET", "types/", action_cs_srvtypes, TOK_NS, 0, 0},
+
+		{"PUT", "srv/", action_cs_put, TOK_NS | TOK_TYPE, 0, 0},
+		{"GET", "srv/", action_cs_get, TOK_NS | TOK_TYPE, 0, 0},
+		{"HEAD", "srv/", action_cs_srvcheck, TOK_NS | TOK_TYPE, 0, 0},
+		{"POST", "srv/", action_cs_post, TOK_NS | TOK_TYPE, TOK_ACTION, 0},
+		{"DELETE", "srv/", action_cs_del, TOK_NS | TOK_TYPE, 0, 0},
 		/// lock, unlock
-		{NULL, NULL, NULL, 0}
+		{NULL, NULL, NULL, 0, 0, 0}
 	};
-	return req_args_call (rq, rp, uri, cs_actions);
+	return req_args_call (rq, rp, uri, path, cs_actions);
 }

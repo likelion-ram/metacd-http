@@ -55,11 +55,11 @@ suite_cs  = [
 	  { 'status':200, 'body':None }),
 	( { 'method':'DELETE', 'url':'/cs/srv/ns/NS/type/meta1', 'body':None },
 	  { 'status':200, 'body':None }),
-	( { 'method':'POST', 'url':'/cs/srv/ns/NS/type/meta1/action/lock', 'body':{
+	( { 'method':'POST', 'url':'/cs/srv/ns/NS/type/meta1?action=lock', 'body':{
 			"ns":"NS","type":"meta1","addr":"127.0.0.1:6004","score":1,"tags":[]
 		}},
 	  { 'status':200, 'body':None }),
-	( { 'method':'POST', 'url':'/cs/srv/ns/NS/type/meta1/action/unlock', 'body':{
+	( { 'method':'POST', 'url':'/cs/srv/ns/NS/type/meta1?action=unlock', 'body':{
 			"ns":"NS","type":"meta1","addr":"127.0.0.1:6004","score":1,"tags":[]
 		}},
 	  { 'status':200, 'body':None }),
@@ -132,7 +132,7 @@ suite_dir = [
 			}},
 		  { 'status':404, 'body':None }),
 
-		( { 'method':'POST', 'url':'/dir/srv/ns/NS/ref/JFS/type/meta0/action/link', 'body':None, },
+		( { 'method':'POST', 'url':'/dir/srv/ns/NS/ref/JFS/type/meta0?action=link', 'body':None, },
 		  { 'status':200, 'body':None }),
 
 		( { 'method':'GET', 'url':'/dir/srv/ns/NS/ref/JFS/type/meta0', 'body':None },
@@ -187,15 +187,15 @@ suite_meta2 = [
 	( { 'method':'GET', 'url':'/m2/container/ns/NS/ref/JFS', 'body':None },
 	  { 'status':404, 'body':None }),
 
-	( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS/action/touch', 'body':None },
+	( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS?action=touch', 'body':None },
 	  { 'status':404, 'body':None }),
-	( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS/action/purge', 'body':None },
+	( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS?action=purge', 'body':None },
 	  { 'status':404, 'body':None }),
-	( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS/action/dedup', 'body':None },
+	( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS?action=dedup', 'body':None },
 	  { 'status':404, 'body':None }),
-	( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS/action/stgpol', 'body':None },
+	( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS?action=stgpol', 'body':None },
 	  { 'status':400, 'body':None }), # Missing the stgpol parameter
-	( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS/action/stgpol/stgpol/NONE', 'body':None },
+	( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS?action=stgpol&stgpol=NONE', 'body':None },
 	  { 'status':404, 'body':None }),
 
 	( { 'method':'PUT', 'url':'/m2/container/ns/NS/ref/JFS', 'body':None },
@@ -204,30 +204,30 @@ suite_meta2 = [
 	  { 'status':200, 'body':None }),
 		( { 'method':'PUT', 'url':'/m2/container/ns/NS/ref/JFS', 'body':None },
 		  { 'status':403, 'body':None }), # Reference created but no meta2 linked
-		( { 'method':'POST', 'url':'/dir/srv/ns/NS/ref/JFS/type/meta2/action/link', 'body':None, },
+		( { 'method':'POST', 'url':'/dir/srv/ns/NS/ref/JFS/type/meta2?action=link', 'body':None, },
 		  { 'status':200, 'body':None }),
 
-			( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS/action/touch', 'body':None },
+			( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS?action=touch', 'body':None },
 			  { 'status':404, 'body':None }),
-			( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS/action/purge', 'body':None },
+			( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS?action=purge', 'body':None },
 			  { 'status':404, 'body':None }),
-			( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS/action/dedup', 'body':None },
+			( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS?action=dedup', 'body':None },
 			  { 'status':404, 'body':None }),
-			( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS/action/stgpol/stgpol/NONE', 'body':None },
+			( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS?action=stgpol&stgpol=NONE', 'body':None },
 			  { 'status':404, 'body':None }),
 
 			( { 'method':'PUT', 'url':'/m2/container/ns/NS/ref/JFS', 'body':None },
 			  { 'status':200, 'body':None }), # Reference created but no meta2 linked
 
-				( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS/action/touch', 'body':None },
+				( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS?action=touch', 'body':None },
 				  { 'status':200, 'body':None }),
-				( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS/action/purge', 'body':None },
+				( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS?action=purge', 'body':None },
 				  { 'status':200, 'body':None }),
-				( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS/action/dedup', 'body':None },
+				( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS?action=dedup', 'body':None },
 				  { 'status':200, 'body':None }),
-				( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS/action/stgpol/stgpol/NONE', 'body':None },
+				( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS?action=stgpol&stgpol=NONE', 'body':None },
 				  { 'status':200, 'body':None }),
-				( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS/action/stgpol/stgpol/NOTFOUND', 'body':None },
+				( { 'method':'POST', 'url':'/m2/container/ns/NS/ref/JFS?action=stgpol&stgpol=NOTFOUND', 'body':None },
 				  { 'status':500, 'body':None }),
 
 			( { 'method':'DELETE', 'url':'/m2/container/ns/NS/ref/JFS', 'body':None },
@@ -277,7 +277,7 @@ suite_meta2 = [
 	( { 'method':'PUT', 'url':'/dir/ref/ns/NS/ref/JFS', 'body':None },
 	  { 'status':200, 'body':None }),
 		# Ensure a meta2 is linked
-		( { 'method':'POST', 'url':'/dir/srv/ns/NS/ref/JFS/type/meta2/action/link', 'body':None, },
+		( { 'method':'POST', 'url':'/dir/srv/ns/NS/ref/JFS/type/meta2?action=link', 'body':None, },
 		  { 'status':200, 'body':None }),
 			# Create the container
 			( { 'method':'PUT', 'url':'/m2/container/ns/NS/ref/JFS', 'body':None },
@@ -309,7 +309,7 @@ suite_meta2 = [
 				( { 'method':'GET', 'url':'/m2/container/ns/NS/ref/JFS', 'body':None },
 				  { 'status':200, 'body':None }),
 
-				( { 'method':'POST', 'url':'/m2/content/ns/NS/ref/JFS/path/plop/action/stgpol/stgpol/NONE', 'body':None },
+				( { 'method':'POST', 'url':'/m2/content/ns/NS/ref/JFS/path/plop?action=stgpol&stgpol=NONE', 'body':None },
 				  { 'status':200, 'body':None }),
 
 				( { 'method':'DELETE', 'url':'/m2/content/ns/NS/ref/JFS/path/plop', 'body':None },
@@ -317,17 +317,17 @@ suite_meta2 = [
 
 				( { 'method':'POST', 'url':'/m2/content/ns/NS/ref/JFS/path/plop', 'body':None },
 				  { 'status':400, 'body':None }), # Missing action
-				( { 'method':'POST', 'url':'/m2/content/ns/NS/ref/JFS/path/plop/action/beans', 'body':None },
+				( { 'method':'POST', 'url':'/m2/content/ns/NS/ref/JFS/path/plop?action=beans', 'body':None },
 				  { 'status':400, 'body':None }), # Missing size
-				( { 'method':'POST', 'url':'/m2/content/ns/NS/ref/JFS/path/plop/action/beans/size/1024', 'body':None },
+				( { 'method':'POST', 'url':'/m2/content/ns/NS/ref/JFS/path/plop?action=beans&size=1024', 'body':None },
 				  { 'status':200, 'body':None }),
 
-				( { 'method':'POST', 'url':'/m2/content/ns/NS/ref/JFS/path/plop/action/touch', 'body':None },
+				( { 'method':'POST', 'url':'/m2/content/ns/NS/ref/JFS/path/plop?action=touch', 'body':None },
 				  { 'status':200, 'body':None }),
 
-				( { 'method':'POST', 'url':'/m2/content/ns/NS/ref/JFS/path/plop/action/stgpol', 'body':None },
+				( { 'method':'POST', 'url':'/m2/content/ns/NS/ref/JFS/path/plop?action=stgpol', 'body':None },
 				  { 'status':400, 'body':None }), # Missing storage policy
-				( { 'method':'POST', 'url':'/m2/content/ns/NS/ref/JFS/path/plop/action/stgpol/stgpol/XXX', 'body':None },
+				( { 'method':'POST', 'url':'/m2/content/ns/NS/ref/JFS/path/plop?action=stgpol&stgpol=XXX', 'body':None },
 				  { 'status':500, 'body':None }), # Invalid storage policy or content not found
 
 			( { 'method':'DELETE', 'url':'/m2/container/ns/NS/ref/JFS', 'body':None },
@@ -414,7 +414,10 @@ def run_test_suite (addr, suite):
 		url = urlparse.urlparse('http://' + str(addr) + i['url'])
 		print "\n", repr(i), "\n", repr(o)
 		cnx = httplib.HTTPConnection(url.netloc)
-		cnx.request(i['method'], url.path, _body(i), _headers(i))
+		u = url.path
+		if url.query:
+			u = u + '?' + url.query
+		cnx.request(i['method'], u, _body(i), _headers(i))
 		resp = cnx.getresponse()
 		status, reason, body = resp.status, resp.reason, resp.read()
 		cnx.close()

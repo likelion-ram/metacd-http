@@ -70,7 +70,7 @@ action_cache_status (const struct cache_args_s *args)
 
 static enum http_rc_e
 action_cache (struct http_request_s *rq, struct http_reply_ctx_s *rp,
-	const gchar * uri)
+	struct req_uri_s *uri, const gchar *path)
 {
 	struct cache_action_s {
 		const gchar *method;
@@ -87,10 +87,12 @@ action_cache (struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		{"POST", "set/max/low/", action_cache_set_max_low},
 		{NULL, NULL, NULL}
 	};
+
 	gboolean matched = FALSE;
+	(void) uri;
 
 	for (struct cache_action_s * pa = dir_actions; pa->prefix; ++pa) {
-		if (!g_str_has_prefix (uri, pa->prefix))
+		if (!g_str_has_prefix (path, pa->prefix))
 			continue;
 		matched = TRUE;
 		if (0 != strcmp (rq->cmd, pa->method))
@@ -98,7 +100,7 @@ action_cache (struct http_request_s *rq, struct http_reply_ctx_s *rp,
 
 		struct cache_args_s args;
 		memset (&args, 0, sizeof (args));
-		args.uri = uri + strlen (pa->prefix);
+		args.uri = path + strlen (pa->prefix);
 		args.count = atoi (args.uri);
 		args.rq = rq;
 		args.rp = rp;

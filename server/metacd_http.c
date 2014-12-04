@@ -72,17 +72,37 @@ static gchar *nsname = NULL;
 static struct hc_resolver_s *resolver = NULL;
 static struct grid_lbpool_s *lbpool = NULL;
 
-static struct grid_task_queue_s *admin_gtq = NULL;
-static GThread *admin_thread = NULL;
+static struct lru_tree_s *push_queue = NULL;
+static GMutex push_mutex;
+#define PUSH_DO(Action) do { \
+	g_mutex_lock(&push_mutex); \
+	Action ; \
+	g_mutex_unlock(&push_mutex); \
+} while (0)
 
-static GStaticMutex nsinfo_mutex;
+static struct grid_task_queue_s *admin_gtq = NULL;
+static struct grid_task_queue_s *upstream_gtq = NULL;
+static struct grid_task_queue_s *downstream_gtq = NULL;
+
+static GThread *admin_thread = NULL;
+static GThread *upstream_thread = NULL;
+static GThread *downstream_thread = NULL;
+
 static struct namespace_info_s nsinfo;
 static gchar **srvtypes = NULL;
+static GMutex nsinfo_mutex;
+#define NSINFO_DO(Action) do { \
+	g_mutex_lock(&nsinfo_mutex); \
+	Action ; \
+	g_mutex_unlock(&nsinfo_mutex); \
+} while (0)
 
 // Configuration
-static guint nsinfo_refresh_delay = 10;
-static gint lb_refresh_delay = 10;
-#define METACD_LB_ENABLED (lb_refresh_delay >= 0)
+static gint timeout_cs_push = 4000;
+static gint lb_downstream_delay = 10;
+static guint lb_upstream_delay = 1;
+static guint nsinfo_refresh_delay = 5;
+#define METACD_LB_ENABLED (lb_downstream_delay > 0)
 
 static guint dir_low_ttl = RESOLVD_DEFAULT_TTL_SERVICES;
 static guint dir_low_max = RESOLVD_DEFAULT_MAX_SERVICES;
@@ -105,9 +125,9 @@ static gboolean validate_srvtype (const gchar * n);
 
 static enum http_rc_e
 action_status(struct http_request_s *rq, struct http_reply_ctx_s *rp,
-		const gchar *uri)
+	struct req_uri_s *uri, const gchar *path)
 {
-	(void) uri;
+	(void) uri, (void) path;
 
 	if (0 == strcasecmp("HEAD", rq->cmd))
 		return _reply_success_json(rp, NULL);
@@ -142,31 +162,46 @@ action_status(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 	return HTTPRC_DONE;
 }
 
-struct action_s {
-	const gchar *prefix;
-	enum http_rc_e (*hook) (struct http_request_s * rq,
-		struct http_reply_ctx_s * rp, const gchar * uri);
-} actions[] = {
-	// Legacy request handlers
-	{"lb/sl/", action_loadbalancing},
-	// New request handlers
-	{"m2/", action_meta2},
-	{"cs/", action_conscience},
-	{"dir/", action_directory},
-	{"cache/", action_cache},
-	{"status", action_status},
-	{NULL, NULL}
-};
-
 static enum http_rc_e
 handler_action (gpointer u, struct http_request_s *rq,
 	struct http_reply_ctx_s *rp)
 {
+	static struct action_s {
+		const gchar *prefix;
+		enum http_rc_e (*hook) (
+				struct http_request_s * rq,
+				struct http_reply_ctx_s * rp,
+				struct req_uri_s *uri,
+				const gchar *path);
+	} actions[] = {
+		// Legacy request handlers
+		{"lb/", action_loadbalancing},
+
+		// New request handlers
+		{"m2/", action_meta2},
+		{"cs/", action_conscience},
+		{"dir/", action_directory},
+		{"cache/", action_cache},
+		{"status", action_status},
+		{NULL, NULL}
+	};
+
 	(void) u;
+	struct req_uri_s ruri = {NULL, NULL, NULL, NULL};
+	_req_uri_extract_components (rq->req_uri, &ruri);
+	GRID_TRACE2("URI path[%s] query[%s] fragment[%s]",
+			ruri.path, ruri.query, ruri.fragment);
+
 	for (struct action_s * pa = actions; pa->prefix; ++pa) {
-		if (g_str_has_prefix (rq->req_uri + 1, pa->prefix))
-			return pa->hook (rq, rp, rq->req_uri + 1 + strlen (pa->prefix));
+		if (g_str_has_prefix (ruri.path + 1, pa->prefix)) {
+			enum http_rc_e rc = pa->hook (rq, rp, &ruri,
+					ruri.path + 1 + strlen (pa->prefix));
+			_req_uri_free_components(&ruri);
+			return rc;
+		}
 	}
+
+	_req_uri_free_components(&ruri);
 	return _reply_no_handler (rp);
 }
 
@@ -180,13 +215,18 @@ static gboolean
 validate_srvtype (const gchar * n)
 {
 	gboolean rc = FALSE;
-	g_static_mutex_lock (&nsinfo_mutex);
-	if (srvtypes) {
+	NSINFO_DO(if (srvtypes) {
 		for (gchar ** p = srvtypes; !rc && *p; ++p)
 			rc = !strcmp (*p, n);
-	}
-	g_static_mutex_unlock (&nsinfo_mutex);
+	});
 	return rc;
+}
+
+static struct lru_tree_s *
+_push_queue_create (void)
+{
+	return lru_tree_create((GCompareFunc)g_strcmp0, g_free,
+			(GDestroyNotify) service_info_clean, LTO_NOATIME);
 }
 
 // Administrative tasks --------------------------------------------------------
@@ -233,9 +273,7 @@ _task_reload_nsinfo (gpointer p)
 			nsname, err->code, err->message);
 		g_clear_error (&err);
 	} else {
-		g_static_mutex_lock (&nsinfo_mutex);
-		namespace_info_copy (ni, &nsinfo, NULL);
-		g_static_mutex_unlock (&nsinfo_mutex);
+		NSINFO_DO(namespace_info_copy (ni, &nsinfo, NULL));
 		namespace_info_free (ni);
 	}
 }
@@ -257,14 +295,50 @@ _task_reload_srvtypes (gpointer p)
 	g_slist_free (_l);
 	_l = NULL;
 
-	g_static_mutex_lock (&nsinfo_mutex);
-	register gchar **tmp = srvtypes;
+	NSINFO_DO(register gchar **tmp = srvtypes;
 	srvtypes = newset;
-	newset = tmp;
-	g_static_mutex_unlock (&nsinfo_mutex);
+	newset = tmp;);
 
 	if (newset)
 		g_strfreev (newset);
+}
+
+// Poll some elements and forward them
+static void
+_task_push (gpointer p)
+{
+	(void) p;
+	struct lru_tree_s *lru = NULL;
+	GSList *tmp = NULL;
+	gboolean _list (gpointer k, gpointer v, gpointer u) {
+		(void) k, (void) u;
+		tmp = g_slist_prepend(tmp, v);
+		return FALSE;
+	}
+
+	PUSH_DO(lru = push_queue; push_queue = _push_queue_create());
+	lru_tree_foreach_DEQ(lru, _list, NULL);
+
+	struct addr_info_s csaddr;
+	gchar *cs = gridcluster_get_config (nsname, "conscience", ~0);
+	if (!cs) {
+		GRID_ERROR("Push error: %s", "No conscience for namespace NS");
+	} else {
+		if (!grid_string_to_addrinfo (cs, NULL, &csaddr)) {
+			GRID_ERROR("Push error: %s", "Invalid conscience address for NS");
+		} else {
+			GError *err = NULL;
+			gcluster_push_services (&csaddr, timeout_cs_push, tmp, TRUE, &err);
+			if (err != NULL) {
+				GRID_WARN("Push error: (%d) %s", err->code, err->message);
+				g_clear_error(&err);
+			}
+		}
+		metautils_str_clean (&cs);
+	}
+
+	g_slist_free(tmp);
+	lru_tree_destroy(lru);
 }
 
 // MAIN callbacks --------------------------------------------------------------
@@ -287,8 +361,24 @@ grid_main_action (void)
 		return;
 	}
 
+	grid_task_queue_fire (admin_gtq);
+	grid_task_queue_fire (upstream_gtq);
+	grid_task_queue_fire (downstream_gtq);
+
 	if (!(admin_thread = grid_task_queue_run (admin_gtq, &err))) {
 		g_prefix_error (&err, "Admin thread startup failure: ");
+		_main_error (err);
+		return;
+	}
+
+	if (!(upstream_thread = grid_task_queue_run (upstream_gtq, &err))) {
+		g_prefix_error (&err, "Upstream thread startup failure: ");
+		_main_error (err);
+		return;
+	}
+
+	if (!(downstream_thread = grid_task_queue_run (downstream_gtq, &err))) {
+		g_prefix_error (&err, "Downstream thread startup failure: ");
 		_main_error (err);
 		return;
 	}
@@ -303,11 +393,16 @@ static struct grid_main_option_s *
 grid_main_get_options (void)
 {
 	static struct grid_main_option_s options[] = {
-		{"LbRefresh", OT_INT, {.i = &lb_refresh_delay},
+
+		{"LbRefresh", OT_INT, {.i = &lb_downstream_delay},
 			"Interval between load-balancer service refreshes (seconds)\n"
 			"\t\t-1 to disable, 0 to never refresh"},
 		{"NsinfoRefresh", OT_UINT, {.u = &nsinfo_refresh_delay},
 			"Interval between NS configuration's refreshes (seconds)"},
+		{"SrvPush", OT_INT, {.u = &lb_upstream_delay},
+			"Interval between load-balancer service refreshes (seconds)\n"
+			"\t\t-1 to disable, 0 to never refresh"},
+
 		{"DirLowTtl", OT_UINT, {.u = &dir_low_ttl},
 			"Directory 'low' (meta1) TTL for cache elements"},
 		{"DirLowMax", OT_UINT, {.u = &dir_low_max},
@@ -328,17 +423,26 @@ grid_main_set_defaults (void)
 }
 
 static void
+_stop_queue (struct grid_task_queue_s **gtq, GThread **gth)
+{
+	if (*gth) {
+		grid_task_queue_stop (*gtq);
+		g_thread_join (*gth);
+		*gth = NULL;
+	}
+	if (*gtq) {
+		grid_task_queue_destroy (*gtq);
+		*gtq = NULL;
+	}
+}
+
+static void
 grid_main_specific_fini (void)
 {
-	if (admin_thread) {
-		grid_task_queue_stop (admin_gtq);
-		g_thread_join (admin_thread);
-		admin_thread = NULL;
-	}
-	if (admin_gtq) {
-		grid_task_queue_destroy (admin_gtq);
-		admin_gtq = NULL;
-	}
+	_stop_queue (&admin_gtq, &admin_thread);
+	_stop_queue (&upstream_gtq, &upstream_thread);
+	_stop_queue (&downstream_gtq, &downstream_thread);
+
 	if (server) {
 		network_server_close_servers (server);
 		network_server_stop (server);
@@ -359,6 +463,8 @@ grid_main_specific_fini (void)
 	}
 	namespace_info_clear (&nsinfo);
 	metautils_str_clean (&nsname);
+	g_mutex_clear(&nsinfo_mutex);
+	g_mutex_clear(&push_mutex);
 }
 
 static gboolean
@@ -374,10 +480,12 @@ grid_main_configure (int argc, char **argv)
 		return FALSE;
 	}
 
+	g_mutex_init (&push_mutex);
+	g_mutex_init (&nsinfo_mutex);
+
 	nsname = g_strdup (argv[1]);
 	metautils_strlcpy_physical_ns (nsname, argv[1], strlen (nsname) + 1);
 
-	g_static_mutex_init (&nsinfo_mutex);
 	memset (&nsinfo, 0, sizeof (nsinfo));
 	metautils_strlcpy_physical_ns (nsinfo.name, argv[1], sizeof (nsinfo.name));
 	nsinfo.chunk_size = 1;
@@ -396,21 +504,33 @@ grid_main_configure (int argc, char **argv)
 			dir_high_max, dir_high_ttl, dir_low_max, dir_low_ttl);
 	}
 
-	admin_gtq = grid_task_queue_create ("admin");
-	grid_task_queue_register (admin_gtq, 1,
-		(GDestroyNotify) _task_expire_resolver, NULL, resolver);
+	// Prepare a queue responsible for upstream to the conscience
+	push_queue = _push_queue_create();
+
+	upstream_gtq = grid_task_queue_create ("upstream");
+
+	grid_task_queue_register(upstream_gtq, (guint) lb_upstream_delay,
+			(GDestroyNotify) _task_push, NULL, NULL);
+
+	// Prepare a queue responsible for the downstream from the conscience
+	downstream_gtq = grid_task_queue_create ("downstream");
 
 	if (METACD_LB_ENABLED)
-		grid_task_queue_register (admin_gtq, (guint) lb_refresh_delay,
+		grid_task_queue_register (downstream_gtq, (guint) lb_downstream_delay,
 			(GDestroyNotify) _task_reload_lbpool, NULL, lbpool);
 
-	grid_task_queue_register (admin_gtq, nsinfo_refresh_delay,
-		(GDestroyNotify) _task_reload_srvtypes, NULL, NULL);
+	// Now prepare a queue for administrative tasks, such as cache expiration,
+	// configuration reloadings, etc.
+	admin_gtq = grid_task_queue_create ("admin");
+
+	grid_task_queue_register (admin_gtq, 1,
+		(GDestroyNotify) _task_expire_resolver, NULL, resolver);
 
 	grid_task_queue_register (admin_gtq, nsinfo_refresh_delay,
 		(GDestroyNotify) _task_reload_nsinfo, NULL, lbpool);
 
-	grid_task_queue_fire (admin_gtq);
+	grid_task_queue_register (admin_gtq, nsinfo_refresh_delay,
+		(GDestroyNotify) _task_reload_srvtypes, NULL, NULL);
 
 	network_server_bind_host (server, argv[0],
 		dispatcher, transport_http_factory);

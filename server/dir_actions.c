@@ -381,12 +381,10 @@ action_dir_ref_destroy (const struct req_args_s *args)
 	if (!err || err->code < 100) {
 		/* Also decache on timeout, a majority of request succeed,
 		 * and it will probably silently succeed  */
-		g_static_mutex_lock (&nsinfo_mutex);
-		if (srvtypes) {
+		NSINFO_DO(if (srvtypes) {
 			for (gchar ** p = srvtypes; *p; ++p)
 				hc_decache_reference_service (resolver, args->url, *p);
-		}
-		g_static_mutex_unlock (&nsinfo_mutex);
+		});
 		hc_decache_reference (resolver, args->url);
 	}
 	if (!err)
@@ -520,24 +518,24 @@ action_dir_prop_del (const struct req_args_s *args)
 
 static enum http_rc_e
 action_directory (struct http_request_s *rq, struct http_reply_ctx_s *rp,
-	const gchar * uri)
+	struct req_uri_s *uri, const gchar *path)
 {
 	static struct req_action_s dir_actions[] = {
-		{"HEAD", "ref/", action_dir_ref_has, TOK_NS | TOK_REF},
-		{"GET", "ref/", action_dir_ref_has, TOK_NS | TOK_REF},
-		{"PUT", "ref/", action_dir_ref_create, TOK_NS | TOK_REF},
-		{"DELETE", "ref/", action_dir_ref_destroy, TOK_NS | TOK_REF},
+		{"HEAD", "ref/", action_dir_ref_has, TOK_NS | TOK_REF, 0, 0},
+		{"GET", "ref/", action_dir_ref_has, TOK_NS | TOK_REF, 0, 0},
+		{"PUT", "ref/", action_dir_ref_create, TOK_NS | TOK_REF, 0, 0},
+		{"DELETE", "ref/", action_dir_ref_destroy, TOK_NS | TOK_REF, 0, 0},
 
-		{"GET", "srv/", action_dir_srv_list, TOK_NS | TOK_REF | TOK_TYPE},
-		{"HEAD", "srv/", action_dir_srv_list, TOK_NS | TOK_REF | TOK_TYPE},
-		{"DELETE", "srv/", action_dir_srv_unlink, TOK_NS | TOK_REF},
-		{"POST", "srv/", action_dir_srv_action, TOK_NS | TOK_REF},
+		{"GET", "srv/", action_dir_srv_list, TOK_NS | TOK_REF | TOK_TYPE, 0, 0},
+		{"HEAD", "srv/", action_dir_srv_list, TOK_NS | TOK_REF | TOK_TYPE, 0, 0},
+		{"DELETE", "srv/", action_dir_srv_unlink, TOK_NS | TOK_REF, 0, 0},
+		{"POST", "srv/", action_dir_srv_action, TOK_NS | TOK_REF, TOK_ACTION, 0},
 
-		{"GET", "prop/", action_dir_prop_get, TOK_NS | TOK_REF},
-		{"POST", "prop/", action_dir_prop_set, TOK_NS | TOK_REF},
-		{"DELETE", "prop/", action_dir_prop_del, TOK_NS | TOK_REF},
+		{"GET", "prop/", action_dir_prop_get, TOK_NS | TOK_REF, 0, 0},
+		{"DELETE", "prop/", action_dir_prop_del, TOK_NS | TOK_REF, 0, 0},
+		{"POST", "prop/", action_dir_prop_set, TOK_NS | TOK_REF, TOK_ACTION, TOK_STGPOL},
 
-		{NULL, NULL, NULL, 0}
+		{NULL, NULL, NULL, 0, 0, 0}
 	};
-	return req_args_call (rq, rp, uri, dir_actions);
+	return req_args_call (rq, rp, uri, path, dir_actions);
 }

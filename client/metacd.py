@@ -37,9 +37,9 @@ schema_tag = {"":""}
 schema_srv = {"ns":"", "type":"", "addr":"", "score":0, "tags":[0]}
 schema_srvset = [ schema_srv ]
 schema_beanset = {"beans":{
-	"aliases":[{"name":"","ver":0,"ctime":0,"header":"","system_metadata":""}]
-	"headers":[{"id":"", "hash":"", "size":0}]
-	"contents":[{"hdr":"", "pos":"", "chunk":""}]
+	"aliases":[{"name":"","ver":0,"ctime":0,"header":"","system_metadata":""}],
+	"headers":[{"id":"", "hash":"", "size":0}],
+	"contents":[{"hdr":"", "pos":"", "chunk":""}],
 	"chunks":[{ "id":"", "hash":"", "size":0 }]
 }}
 

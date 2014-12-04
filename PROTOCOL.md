@@ -30,86 +30,105 @@ In the following description, a few ``${...}`` elements are presented. For each 
   * **HEAD** Check the service type is known for this namespace
   * **DELETE** flush a service definition or a single service
   * **POST**
-    * ``action/lock`` force the score of the service described in the body [to the value in the description].
-    * ``action/unlock`` releases the lock on the service score. The tags are ignored.
+    * ``?action=lock`` force the score of the service described in the body [to the value in the description].
+      * input body : a single JSON formatted service description
+    * ``?action=unlock`` releases the lock on the service score. The tags are ignored.
+      * input body : a single JSON formatted service description
 
 ## High-level Directory operations
 
 ### Reference management
   * URL ``/dir/ref``
     * ``ns/${NS}``
-  * **PUT** Reference creation
     * ``ref/${REF}``
+  * **PUT** Reference creation
   * **DELETE** Reference destruction
-    * ``cid/${CID}`` or ``ref/${REF}``
   * **HEAD** Reference presence check
-    * ``cid/${CID}`` or ``ref/${REF}``
   * **GET** Reference presence check
-    * ``cid/${CID}`` or ``ref/${REF}``
 
 ### Services management
   * URL ``/dir/srv``
     * ``ns/${NS}``
-    * ``ref/${REF}`` or ``cid/${CID}``
+    * ``ref/${REF}``
     * ``type/${TYPE}``
   * **GET** List the associated services
   * **DELETE** Removes an associated service.
   * **POST** Ensure a valid service is associated
-    * ``action/link`` 
-    * ``action/renew`` 
-    * ``action/force`` 
-	  * input body : JSON encoded service description
+    * ``?action=link`` 
+    * ``?action=renew`` 
+    * ``?action=force`` 
+	  * input body : JSON encoded service description (cf. below)
 
 ### Properties handling
   * URL ``/dir/prop``
     * ``ns/${NS}``
     * ``ref/${REF}``
-  * **POST** Set a property
   * **GET** List properties.
+    * output body : JSON encoded array of tuples (pairs)
+  * **PUT** Set a property
+    * input body : JSON encoded array of tuples (pairs)
 
 ## Meta2 operations
 
 ### Container operations
   * URL ``/m2/container``
     * ``ns/${NS}``
-  * **HEAD** container existence check
-    * ``cid/${CID}`` or ``ref/${REF}``
-  * **PUT** container creation. No input expected.
     * ``ref/${REF}``
+  * **HEAD** container existence check
+  * **PUT** container creation. No input expected.
   * **GET** container listing
-    * ``cid/${CID}`` or ``ref/${REF}``
   * **DELETE** container existence check
-    * ``cid/${CID}`` or ``ref/${REF}``
   * **POST** additional set of actions
-    * ``cid/${CID}`` or ``ref/${REF}``
-    * ``action/touch``
-    * ``action/purge``
-    * ``action/dedup``
-    * ``action/stgpol``
-	  * ``policy/${STRING}``
+    * ``?action=touch``
+    * ``?action=purge``
+    * ``?action=dedup``
+    * ``?action=stgpol``
+	  * ``&policy=${STRING}``
 
 ### Content operations
   * URL ``/m2/content``
     * ``ns/${NS}``
-    * ``ref/${REF}`` or ``cid/${CID}``
+    * ``ref/${REF}``
     * ``path/${PATH}``
   * **PUT** Store a new set of beans. This set of beans must be a coherent set of aliases.
   * **GET** Fetch the beans belonging to the specified content
   * **HEAD** Check for the content presence
   * **DELETE** 
   * **POST** additional set of actions on contents
-    * ``action/beans`` generate some beans
-      * ``size/${INT}``
-      * ``policy/${POLICY}`` OPTIONAL
-    * ``action/copy``
-    * ``action/touch``
-    * ``action/stgpol``
+    * ``?action=copy``
+    * ``?action=touch``
+    * ``?action=stgpol``
+    * ``?action=beans`` generate some beans
+      * ``&size=${INT}``
+      * ``&policy=${POLICY}`` OPTIONAL
 
 ### Container properties
   * URL ``/m2/container/prop
+    * ``ns/${NS}``
+    * ``ref/${REF}``
+  * ``HEAD``
+  * ``GET``
+  * ``PUT``
 
 ### Content properties
   * URL ``/m2/content/prop``
+    * ``ns/${NS}``
+    * ``ref/${REF}``
+    * ``path/${PATH}``
+  * ``HEAD``
+  * ``GET``
+  * ``PUT``
+
+## Load-Balancing
+  * Common options
+    * ``tag=${TAG}`` : unset by default
+    * ``size=${INT}`` : 1 by default, must be positive if set
+  * URL ``/lb/rr`` : poll following a Round Robin
+  * URL ``/lb/wrr`` : poll following a Weighted Round Robin
+  * URL ``/lb/rand`` : peek a random set of elements, using a uniform distribution of probabilities.
+  * URL ``/lb/wrr`` : peek a random set of elements, using a weighted distribution of probabilities.
+  * URL ``/lb/h`` : peek a random set of elements, using a weighted distribution of probabilities.
+    * ``?key=${STR}`` the mandatory key used to find the right service
 
 ## Caches management
   * **GET** only
