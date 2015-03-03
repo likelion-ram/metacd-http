@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.6)
-project (Grid)
+project (Grid C)
 
 macro(test_CLI var msg)
 	if (${var})
@@ -69,6 +69,8 @@ set(CMAKE_C_FLAGS_RELEASE        "-O2")
 set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O2 -fno-inline")
 set(CMAKE_C_FLAGS_MINSIZEREL     "-Os -s")
 set(CMAKE_INSTALL_PREFIX "/usr/local")
+
+add_definitions(-DHAVE_UGLY_RC_FUNCTIONS=1)
 
 add_definitions(-DAPI_VERSION="${API_VERSION}")
 add_definitions(-DSHORT_API_VERSION="${SHORT_API_VERSION}")
@@ -141,18 +143,43 @@ else (PkgConfig_FOUND)
 endif (PkgConfig_FOUND)
 
 pkg_check_modules(GLIB2 REQUIRED glib-2.0 gthread-2.0 gmodule-2.0)
+pkg_check_modules(JSONC json json-c)
 
 ###--------------------------###
 ### Dependency to RedCurrant ###
 ###--------------------------###
-set(REDCURRANT_INCLUDE_DIRS "/usr/include")
-set(REDCURRANT_LIBRARY_DIRS "/${LD_LIBDIR}")
+if (NOT DEFINED REDCURRANT_INCLUDE_DIRS)
+	set(REDCURRANT_INCLUDE_DIRS "/usr/include")
+endif()
+if (NOT DEFINED REDCURRANT_LIBRARY_DIRS)
+	set(REDCURRANT_LIBRARY_DIRS "/${LD_LIBDIR}")
+endif()
 if (REDCURRANT_LIBDIR)
 	set(REDCURRANT_LIBRARY_DIRS "${REDCURRANT_LIBDIR}")
 endif(REDCURRANT_LIBDIR)
 if (REDCURRANT_INCDIR)
 	set(REDCURRANT_INCLUDE_DIRS ${REDCURRANT_INCDIR})
 endif (REDCURRANT_INCDIR)
+
+###---------------------###
+### Dependency to JSONC ###
+###---------------------###
+if (NOT DEFINED JSONC_INCLUDE_DIRS)
+	set(JSONC_INCLUDE_DIRS "/usr/include")
+endif ()
+if (NOT DEFINED JSONC_LIBRARY_DIRS)
+	set(JSONC_LIBRARY_DIRS "/usr/${LD_LIBDIR}")
+endif ()
+if (JSONC_INCDIR)
+	set(JSONC_INCLUDE_DIRS ${JSONC_INCDIR})
+endif()
+if(JSONC_LIBDIR)
+	set(JSONC_LIBRARY_DIRS ${JSONC_LIBDIR})
+endif()
+find_file(JSONC_FOUND json.h ${JSONC_INCLUDE_DIRS})
+if (JSONC_FOUND)
+	find_library(JSONC_FOUND libjson-c.so ${JSONC_LIBRARY_DIRS})
+endif ()
 
 ###-------------------------------------------------------------------------###
 
@@ -164,18 +191,22 @@ include_directories(BEFORE
 
 include_directories(AFTER
 		${GLIB2_INCLUDE_DIRS}
-		${REDCURRANT_INCLUDE_DIRS})
+		${REDCURRANT_INCLUDE_DIRS}
+		${JSONC_INCLUDE_DIRS})
 
 link_directories(
 		${GLIB2_LIBRARY_DIRS}
-		${REDCURRANT_LIBRARY_DIRS})
+		${REDCURRANT_LIBRARY_DIRS}
+		${JSONC_LIBRARY_DIRS})
 
-add_executable(metacd_http metacd_http.c)
+add_executable(metacd_http server/metacd_http.c)
 
 target_link_libraries(metacd_http
-		metautils metacomm gridcluster server hcresolve
+		metautils metacomm server hcresolve
+		gridcluster gridcluster-remote
 		meta2v2remote meta2v2utils meta2servicesremote
-		${GLIB2_LIBRARIES})
+		meta1remote
+		${GLIB2_LIBRARIES} ${JSONC_LIBRARIES})
 
 install(TARGETS metacd_http 
 		LIBRARY DESTINATION ${LD_LIBDIR}
