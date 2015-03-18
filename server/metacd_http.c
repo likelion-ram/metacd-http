@@ -73,11 +73,11 @@ static struct hc_resolver_s *resolver = NULL;
 static struct grid_lbpool_s *lbpool = NULL;
 
 static struct lru_tree_s *push_queue = NULL;
-static GMutex push_mutex;
+static GStaticMutex push_mutex;
 #define PUSH_DO(Action) do { \
-	g_mutex_lock(&push_mutex); \
+	g_static_mutex_lock(&push_mutex); \
 	Action ; \
-	g_mutex_unlock(&push_mutex); \
+	g_static_mutex_unlock(&push_mutex); \
 } while (0)
 
 static struct grid_task_queue_s *admin_gtq = NULL;
@@ -90,11 +90,11 @@ static GThread *downstream_thread = NULL;
 
 static struct namespace_info_s nsinfo;
 static gchar **srvtypes = NULL;
-static GMutex nsinfo_mutex;
+static GStaticMutex nsinfo_mutex;
 #define NSINFO_DO(Action) do { \
-	g_mutex_lock(&nsinfo_mutex); \
+	g_static_mutex_lock(&nsinfo_mutex); \
 	Action ; \
-	g_mutex_unlock(&nsinfo_mutex); \
+	g_static_mutex_unlock(&nsinfo_mutex); \
 } while (0)
 
 // Configuration
@@ -463,8 +463,8 @@ grid_main_specific_fini (void)
 	}
 	namespace_info_clear (&nsinfo);
 	metautils_str_clean (&nsname);
-	g_mutex_clear(&nsinfo_mutex);
-	g_mutex_clear(&push_mutex);
+	g_static_mutex_free(&nsinfo_mutex);
+	g_static_mutex_free(&push_mutex);
 }
 
 static gboolean
@@ -480,8 +480,8 @@ grid_main_configure (int argc, char **argv)
 		return FALSE;
 	}
 
-	g_mutex_init (&push_mutex);
-	g_mutex_init (&nsinfo_mutex);
+	g_static_mutex_init (&push_mutex);
+	g_static_mutex_init (&nsinfo_mutex);
 
 	nsname = g_strdup (argv[1]);
 	metautils_strlcpy_physical_ns (nsname, argv[1], strlen (nsname) + 1);
