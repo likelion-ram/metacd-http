@@ -562,12 +562,43 @@ _multiple_get_v2_or_v1(gchar **m2v, struct hc_url_s *url, GSList **beans)
 			return NULL;
 
 		if (err->code == 404) {
-			GRID_INFO("M2V2 error : probably a M2V1");
+			GRID_INFO("M2V2 error: probably a M2V1");
 			g_clear_error(&err);
 			err = _single_get_v1(*m2v, url, beans);
 		}
 		else {
-			GRID_INFO("M2V2 error : (%d) %s", err->code, err->message);
+			GRID_INFO("M2V2 error: (%d) %s", err->code, err->message);
+			g_prefix_error(&err, "M2V2 error: ");
+		}
+
+		if (!err) // M2V1 success
+			return NULL;
+		if (err->code >= 400)
+			return err;
+		g_clear_error(&err);
+	}
+
+	return NEWERROR(500, "No META2 replied");
+}
+
+static GError*
+_multiple_get_prop_v2_or_v1(gchar **m2v, struct hc_url_s *url, GSList **beans)
+{
+	for (; m2v && *m2v ;++m2v) {
+		struct meta1_service_url_s *m2 = meta1_unpack_url(*m2v);
+		GError *err = m2v2_remote_execute_PROP_GET(m2->host, NULL, url, 0, beans);
+		meta1_service_url_clean(m2);
+
+		if (!err) // M2V2 success
+			return NULL;
+
+		if (err->code == 404) {
+			GRID_INFO("M2V2 error: probably a M2V1");
+			g_clear_error(&err);
+			err = _single_get_v1(*m2v, url, beans);
+		}
+		else {
+			GRID_INFO("M2V2 error: (%d) %s", err->code, err->message);
 			g_prefix_error(&err, "M2V2 error: ");
 		}
 
@@ -615,6 +646,30 @@ _json_alias_only(GString *gstr, GSList *l)
 		g_string_append(g, "\"}");
 	}
 	_json_BEAN_only(gstr, l, &descr_struct_ALIASES, code);
+}
+
+static void
+_json_properties_only(GString *gstr, GSList *l)
+{
+	void code(GString *g, gpointer bean)
+	{
+		gchar value[4096];
+		g_string_append_c(g, '"');
+		g_string_append(g, PROPERTIES_get_key(bean)->str);
+		g_string_append(g, "\":\"");
+		gsize ret;
+		ret = metautils_gba_data_to_string(PROPERTIES_get_value(bean),
+				value, sizeof(value));
+		if (ret <= 0) {
+			g_string_append(g, "string conversion error");
+		} else {
+			char *val = g_strescape(value, NULL);
+			g_string_append(g, val);
+			g_free(val);
+		}
+		g_string_append_c(g, '"');
+	}
+	_json_BEAN_only(gstr, l, &descr_struct_PROPERTIES, code);
 }
 
 static void
@@ -678,6 +733,26 @@ _resolve_m2_and_get(struct hc_resolver_s *r, struct hc_url_s *u, GSList **beans)
 	return err;
 }
 
+static GError *
+_resolve_m2_and_get_prop(struct hc_resolver_s *r, struct hc_url_s *u, GSList **beans)
+{
+	gchar **m2v = NULL;
+	GError *err;
+
+	if (NULL != (err = hc_resolve_reference_service(r, u, "meta2", &m2v))) {
+		g_prefix_error(&err, "Resolution error: ");
+		return err;
+	}
+
+	if (!*m2v)
+		err = NEWERROR(CODE_CONTAINER_NOTFOUND, "No meta2 located");
+	else
+		err =  _multiple_get_prop_v2_or_v1(m2v, u, beans);
+
+	g_strfreev(m2v);
+	return err;
+}
+
 static enum http_rc_e
 action_m2_list(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		const gchar *uri)
@@ -733,6 +808,46 @@ action_m2_get(struct http_request_s *rq, struct http_reply_ctx_s *rp,
 }
 
 static enum http_rc_e
+action_m2_properties(struct http_request_s *rq, struct http_reply_ctx_s *rp,
+		const gchar *uri)
+{
+	struct hc_url_s *url = NULL;
+	GError *err;
+
+	if (g_ascii_strcasecmp(rq->cmd, "GET"))
+		return _reply_method_error(rp);
+	if (NULL != (err = _extract_m2_url(uri, &url)))
+		return _reply_format_error(rp, err);
+
+	if (!hc_url_has(url, HCURL_NS) || !hc_url_has(url, HCURL_REFERENCE)
+			|| !hc_url_has(url, HCURL_PATH)) {
+		hc_url_clean(url);
+		return _reply_format_error(rp, NEWERROR(400, "Partial URL"));
+	}
+
+	GSList *beans = NULL;
+	if (NULL != (err = _resolve_m2_and_get_prop(resolver, url, &beans))) {
+		hc_url_clean(url);
+		g_prefix_error(&err, "M2 error: ");
+		return _reply_soft_error(rp, err);
+	}
+
+	// Prepare the header
+	GString *gstr = g_string_sized_new(512);
+	g_string_append_c(gstr, '{');
+	_append_status(gstr, 200, "OK");
+	g_string_append_c(gstr, ',');
+	_append_url(gstr, url);
+	g_string_append(gstr, ",\"properties\":{");
+	_json_properties_only(gstr, beans);
+	g_string_append_len(gstr, "}}", 2);
+
+	_bean_cleanl2(beans);
+	hc_url_clean(url);
+	return _reply_success_json(rp, gstr);
+}
+
+static enum http_rc_e
 handler_m2(gpointer u, struct http_request_s *rq, struct http_reply_ctx_s *rp)
 {
 	(void) u;
@@ -744,8 +859,12 @@ handler_m2(gpointer u, struct http_request_s *rq, struct http_reply_ctx_s *rp)
 	gchar *action = module + sizeof("m2/") - 1;
 	if (g_str_has_prefix(action, "get/"))
 		return action_m2_get(rq, rp, action + sizeof("get/") - 1);
+
 	if (g_str_has_prefix(action, "list/"))
 		return action_m2_list(rq, rp, action + sizeof("list/") - 1);
+
+	if (g_str_has_prefix(action, "properties/"))
+		return action_m2_properties(rq, rp, action + sizeof("properties/") - 1);
 
 	return _reply_no_handler(rp);
 }
