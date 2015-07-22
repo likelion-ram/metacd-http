@@ -106,18 +106,18 @@ In the following description, a few ``${...}`` elements are presented. For each 
   * URL ``/m2/container/prop
     * ``ns/${NS}``
     * ``ref/${REF}``
-  * ``HEAD``
-  * ``GET``
-  * ``PUT``
+  * **GET** List properties
+  * **PUT** Set properties (see body format at the end)
+  * **DELETE** Del properties (see body format at the end)
 
 ### Content properties
   * URL ``/m2/content/prop``
     * ``ns/${NS}``
     * ``ref/${REF}``
     * ``path/${PATH}``
-  * ``HEAD``
-  * ``GET``
-  * ``PUT``
+  * **GET** List properties
+  * **PUT** Set properties (see body format at the end)
+  * **DELETE** Del properties (see body format at the end)
 
 ## Load-Balancing
   * Common options
@@ -159,6 +159,27 @@ In the following description, a few ``${...}`` elements are presented. For each 
     * Output: A JSON object with a status, and a key ``beans`` pointing to a set of m2v2 beans.
 
 ## Payloads
+### Properties
+```json
+{
+  "beans": {
+    "properties": [
+      {
+        "version": 0,
+        "key": "key1",
+        "value": "value1",
+        "deleted": false
+      },
+      {
+        "version": 0,
+        "key": "key2",
+        "value": "value2",
+        "deleted": false
+      }
+    ]
+  }
+}
+```
 ### Array of services
 ```json
 [

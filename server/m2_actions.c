@@ -278,6 +278,99 @@ action_m2_container_action (const struct req_args_s *args)
 	return _reply_format_error (args->rp, BADREQ ("invalid action"));
 }
 
+static enum http_rc_e
+action_m2_container_list_prop (const struct req_args_s *args)
+{
+	// TODO manage snapshot ?
+	GSList *beans = NULL;
+	GError *hook (struct meta1_service_url_s *m2) {
+		return m2v2_remote_execute_PROP_GET (m2->host, NULL, args->url, 0,
+				&beans);
+	}
+	GError *err = _resolve_m2_and_do (resolver, args->url, hook);
+	return _reply_beans (args, err, beans);
+}
+
+static GError *
+_m2_json_prop_set (struct hc_url_s *url, struct json_object *jbody,
+		gboolean delete)
+{
+	GSList *beans = NULL;
+	GError *err;
+
+	if (NULL != (err = _jbody_to_beans (&beans, jbody, "beans"))) {
+		_bean_cleanl2 (beans);
+		return err;
+	}
+	// Add deleted flag if asked
+	if (delete) {
+		for (GSList * l = beans; l; l = l->next) {
+			if (DESCR (l->data) == &descr_struct_PROPERTIES) {
+				PROPERTIES_set_deleted(l->data, delete);
+				PROPERTIES_set2_value(l->data, (guint8*)"", 0);
+			}
+		}
+	}
+
+	GError *hook (struct meta1_service_url_s * m2) {
+		return m2v2_remote_execute_PROP_SET (m2->host, NULL, url, 0, beans);
+	}
+	err = _resolve_m2_and_do (resolver, url, hook);
+	_bean_cleanl2 (beans);
+	return err;
+}
+
+static enum http_rc_e
+_m2_container_prop_set (const struct req_args_s *args, gboolean delete)
+{
+	GError *err = NULL;
+	char *json_string;
+	int json_string_len;
+	struct json_tokener *parser;
+	struct json_object *jbody;
+	enum json_tokener_error jerr;
+
+	json_string = (char*)args->rq->body->data;
+	json_string_len = args->rq->body->len;
+	if (json_string == NULL || json_string_len <= 0) {
+		 GSETERROR(&err, "Json data string not found in request");
+		 goto exit;
+	}
+
+	parser = json_tokener_new ();
+	do {
+		jbody = json_tokener_parse_ex(parser, json_string, json_string_len);
+	}
+	while ((jerr = json_tokener_get_error(parser)) == json_tokener_continue);
+
+	if (jerr != json_tokener_success) {
+		GSETERROR(&err, "Failed to parse json body: %s",
+				json_tokener_error_desc(jerr));
+	} else
+		err = _m2_json_prop_set (args->url, jbody, delete);
+
+	json_object_put (jbody);
+	json_tokener_free (parser);
+
+exit:
+	if (err != NULL)
+		return _reply_soft_error (args->rp, err);
+	else
+		return _reply_success_json (args->rp, NULL);
+}
+
+static enum http_rc_e
+action_m2_container_prop_put (const struct req_args_s *args)
+{
+	return _m2_container_prop_set(args, FALSE);
+}
+
+static enum http_rc_e
+action_m2_container_prop_del (const struct req_args_s *args)
+{
+	return _m2_container_prop_set(args, TRUE);
+}
+
 //------------------------------------------------------------------------------
 
 static enum http_rc_e
@@ -599,6 +692,13 @@ action_meta2 (struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		{"GET", "get/", action_m2_get,
 			TOK_NS | TOK_REF | TOK_PATH, 0, TOK_VERSION},
 
+		{"PUT", "container/prop/", action_m2_container_prop_put,
+			TOK_NS | TOK_REF, 0, 0},
+		{"GET", "container/prop/", action_m2_container_list_prop,
+			TOK_NS | TOK_REF, 0, 0},
+		{"DELETE", "container/prop/", action_m2_container_prop_del,
+			TOK_NS | TOK_REF, 0, 0},
+
 		{"PUT", "container/", action_m2_container_create,
 			TOK_NS | TOK_REF, 0, 0},
 		{"GET", "container/", action_m2_container_list,
@@ -610,6 +710,13 @@ action_meta2 (struct http_request_s *rq, struct http_reply_ctx_s *rp,
 		{"POST", "container/", action_m2_container_action,
 			TOK_NS | TOK_REF, TOK_ACTION, TOK_STGPOL},
 		// purge, dedup, touch, stgpol
+
+		{"PUT", "content/prop/", action_m2_container_prop_put,
+			TOK_NS | TOK_REF | TOK_PATH, 0, 0},
+		{"GET", "content/prop/", action_m2_container_list_prop,
+			TOK_NS | TOK_REF | TOK_PATH, 0, 0},
+		{"DELETE", "content/prop/", action_m2_container_prop_del,
+			TOK_NS | TOK_REF | TOK_PATH, 0, 0},
 
 		{"PUT", "content/", action_m2_content_put,
 			TOK_NS | TOK_REF | TOK_PATH, 0, 0},
