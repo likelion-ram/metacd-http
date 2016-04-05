@@ -107,13 +107,15 @@ _lb (const struct req_args_s *args, struct grid_lb_iterator_s *iter)
 		return _reply_soft_error (args->rp, NEWERROR (460, "Type not managed"));
 
 	// Terribly configurable and poorly implemented LB
-	struct storage_class_s *stgcls = storage_class_init(&nsinfo, args->stgcls);
+	struct storage_class_s *stgcls;
+	NSINFO_DO(stgcls = storage_class_init(&nsinfo, args->stgcls));
 	struct lb_next_opt_ext_s opt;
 	opt.req.distance = 1;
 	opt.req.max = args->size ? atoi(args->size) : 1;
 	opt.req.duplicates = FALSE;
 	opt.req.stgclass = !args->stgcls ? NULL : stgcls;
 	opt.req.strict_stgclass = FALSE;
+	opt.req.shuffle = FALSE;
 	opt.filter.data = NULL;
 	opt.filter.hook = args->tagk ? _filter_tag : NULL;
 	opt.srv_inplace = NULL;
