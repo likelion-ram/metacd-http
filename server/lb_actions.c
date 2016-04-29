@@ -82,27 +82,30 @@ _lb_pack_and_free_srvinfo_tab (struct service_info_s **siv)
 	return gstr;
 }
 
+static gboolean
+_filter_tag (struct service_info_s *si, gpointer u)
+{
+	const struct req_args_s *args = u;
+
+	if (!args->tagk)
+		return TRUE;
+	if (!si || !si->tags)
+		return FALSE;
+
+	struct service_tag_s *tag = service_info_get_tag(si->tags, args->tagk);
+	if (!tag)
+		return FALSE;
+	if (!args->tagv) // No value specified, the presence is enough
+		return TRUE;
+
+	gchar tmp[128];
+	service_tag_to_string(tag, tmp, sizeof(tmp));
+	return 0 == strcmp(tmp, args->tagv);
+}
+
 static enum http_rc_e
 _lb (const struct req_args_s *args, struct grid_lb_iterator_s *iter)
 {
-	gboolean _filter_tag (struct service_info_s *si, gpointer u) {
-		(void)u;
-		if (!args->tagk)
-			return TRUE;
-		if (!si || !si->tags)
-			return FALSE;
-
-		struct service_tag_s *tag = service_info_get_tag(si->tags, args->tagk);
-		if (!tag)
-			return FALSE;
-		if (!args->tagv) // No value specified, the presence is enough
-			return TRUE;
-
-		gchar tmp[128];
-		service_tag_to_string(tag, tmp, sizeof(tmp));
-		return 0 == strcmp(tmp, args->tagv);
-	}
-
 	if (!iter)
 		return _reply_soft_error (args->rp, NEWERROR (460, "Type not managed"));
 
@@ -117,7 +120,7 @@ _lb (const struct req_args_s *args, struct grid_lb_iterator_s *iter)
 	opt.req.strict_stgclass = FALSE;
 	opt.req.shuffle = FALSE;
 	opt.filter.data = NULL;
-	opt.filter.hook = args->tagk ? _filter_tag : NULL;
+	opt.filter.hook = NULL;
 	opt.srv_inplace = NULL;
 	opt.srv_forbidden = NULL;
 
@@ -137,51 +140,89 @@ _lb (const struct req_args_s *args, struct grid_lb_iterator_s *iter)
 	}
 }
 
+static gchar *
+_get_filter_id(gpointer _args)
+{
+	const struct req_args_s *args = _args;
+	return g_strconcat(args->tagk, "=", args->tagv, NULL);
+}
+
+static inline void
+_set_lb_hooks(struct grid_lb_iterator_s *it, const struct req_args_s *args)
+{
+	if (args->tagk)
+		grid_lb_iterator_set_pre_filter(it, _filter_tag, (gpointer) args,
+				_get_filter_id, (gpointer) args);
+}
+
+enum LB_TYPE
+{
+	DEF = 0,
+	RR,
+	WRR,
+	RAND,
+	WRAND
+};
+
+static enum http_rc_e
+_action_lb(const struct req_args_s *args, enum LB_TYPE type)
+{
+	struct grid_lb_s *lb = grid_lbpool_ensure_lb(lbpool, args->type);
+	struct grid_lb_iterator_s *iter = NULL;
+
+	switch (type) {
+	case RR:
+		iter = grid_lb_iterator_round_robin(lb);
+		break;
+	case WRR:
+		iter = grid_lb_iterator_weighted_round_robin(lb);
+		break;
+	case RAND:
+		iter = grid_lb_iterator_random(lb);
+		break;
+	case WRAND:
+		iter = grid_lb_iterator_weighted_random(lb);
+		break;
+	case DEF:
+	default:
+		iter = grid_lbpool_ensure_iterator(lbpool, args->type);
+		break;
+	}
+
+	_set_lb_hooks(iter, args);
+	enum http_rc_e rc = _lb (args, iter);
+	grid_lb_iterator_clean (iter);
+	return rc;
+}
+
 static enum http_rc_e
 action_lb_def (const struct req_args_s *args)
 {
-	// Forward with the default iterator
-	return _lb (args, grid_lbpool_ensure_iterator(lbpool, args->type));
+	return _action_lb(args, DEF);
 }
 
 static enum http_rc_e
 action_lb_rr (const struct req_args_s *args)
 {
-	struct grid_lb_s *lb = grid_lbpool_ensure_lb(lbpool, args->type);
-	struct grid_lb_iterator_s *iter = grid_lb_iterator_round_robin(lb);
-	enum http_rc_e rc = _lb (args, iter);
-	grid_lb_iterator_clean (iter);
-	return rc;
+	return _action_lb(args, RR);
 }
 
 static enum http_rc_e
 action_lb_wrr (const struct req_args_s *args)
 {
-	struct grid_lb_s *lb = grid_lbpool_ensure_lb(lbpool, args->type);
-	struct grid_lb_iterator_s *iter = grid_lb_iterator_weighted_round_robin(lb);
-	enum http_rc_e rc = _lb (args, iter);
-	grid_lb_iterator_clean (iter);
-	return rc;
+	return _action_lb(args, WRR);
 }
 
 static enum http_rc_e
 action_lb_rand (const struct req_args_s *args)
 {
-	struct grid_lb_s *lb = grid_lbpool_ensure_lb(lbpool, args->type);
-	struct grid_lb_iterator_s *iter = grid_lb_iterator_random(lb);
-	enum http_rc_e rc = _lb (args, iter);
-	grid_lb_iterator_clean (iter);
-	return rc;
+	return _action_lb(args, RAND);
 }
 
 static enum http_rc_e
 action_lb_wrand (const struct req_args_s *args)
 {
-	struct grid_lb_s *lb = grid_lbpool_ensure_lb(lbpool, args->type);
-	struct grid_lb_iterator_s *iter = grid_lb_iterator_weighted_random(lb);
-	enum http_rc_e rc = _lb (args, iter);
-	grid_lb_iterator_clean (iter);
-	return rc;
+	return _action_lb(args, WRAND);
 }
 
 //------------------------------------------------------------------------------
